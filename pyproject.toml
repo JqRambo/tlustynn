@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tlustynn"
+version = "0.1.0"
+description = "Physics-Informed Neural Network (PINN) for TLUSTY stellar atmosphere prediction"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = ""},
+]
+keywords = ["neural-network", "stellar-atmosphere", "TLUSTY", "PINN", "astrophysics"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "matplotlib",
+    "tqdm",
+]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/tlusty-nn"
+Repository = "https://github.com/YOUR_USERNAME/tlusty-nn"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tlustynn*"]
+
+[tool.setuptools.package-data]
+tlustynn = ["checkpoints/*"]
