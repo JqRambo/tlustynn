@@ -44,6 +44,7 @@ import tlustynn
 
 ### Predict a single atmosphere model
 
+```python
 from tlustynn import predict_atmosphere
 
 # Predict and save as CSV
@@ -57,10 +58,13 @@ df, csv_path = predict_atmosphere(
 
 print(f"CSV saved to: {csv_path}")   # → .../predictions/10000_3.7_0.0.csv
 print(f"DataFrame shape: {df.shape}")  # (50, 58) → 50 depths × 58 parameters
+```
 
 The default file names follow the format **`{teff}_{logg}_{mh}.csv`** and **`{teff}_{logg}_{mh}.7`**.
 
 # Predict and save as TLUSTY .7 format (fort.7)
+
+```python
 df, seven_path = predict_atmosphere(
     teff=10000,
     logg=3.7,
@@ -69,11 +73,12 @@ df, seven_path = predict_atmosphere(
     output_format='7'     # Save as .7 file
 )
 
-
 print(f".7 file saved to: {seven_path}")  # → .../predictions/10000_3.7_0.0.7
+```
 
 ### Create TLUSTY input file (.5 format)
 
+```python
 from tlustynn import create_ff_model
 
 # Generate a TLUSTY input model file (fort.5 format)
@@ -88,7 +93,7 @@ create_ff_model(
     frequency=2000,
     natoms_num=8
 )
-
+```
 
 
 ##  Output formats
