@@ -39,61 +39,52 @@ import tlustynn
 
 ### Predict a single atmosphere model
 
-```python
 from tlustynn import predict_atmosphere
 
-# Predict and automatically save to CSV + TLUSTY .7 file
-df, paths = predict_atmosphere(
+# Predict and save as CSV
+df, csv_path = predict_atmosphere(
     teff=10000,   # Effective temperature [K]
     logg=3.7,     # Surface gravity [log10(cm/s^2)]
     mh=0.0,       # Metallicity [dex]
-    output_dir="./predictions"
+    output_dir="./predictions",
+    output_format='csv'   # Save as CSV file
 )
 
-print(f"CSV saved to: {paths['csv']}")    # → .../predictions/10000_3.7_0.0.csv
-print(f".7  saved to: {paths['7']}")      # → .../predictions/10000_3.7_0.0.7
-```
+print(f"CSV saved to: {csv_path}")   # → .../predictions/10000_3.7_0.0.csv
+print(f"DataFrame shape: {df.shape}")  # (50, 58) → 50 depths × 58 parameters
 
 The default file names follow the format **`{teff}_{logg}_{mh}.csv`** and **`{teff}_{logg}_{mh}.7`**.
 
-### Disable the .7 output
-
-```python
-df, paths = predict_atmosphere(
-    teff=27000, logg=3.9, mh=-1.0,
-    output_dir="./my_models",
-    save_7=False          # only CSV will be written
+# Predict and save as TLUSTY .7 format (fort.7)
+df, seven_path = predict_atmosphere(
+    teff=10000,
+    logg=3.7,
+    mh=0.0,
+    output_dir="./predictions",
+    output_format='7'     # Save as .7 file
 )
-```
 
-### Custom file name
 
-```python
-df, paths = predict_atmosphere(
-    teff=27000, logg=3.9, mh=-1.0,
-    output_dir="./my_models",
-    filename="model_A"     # produces model_A.csv and model_A.7
+print(f".7 file saved to: {seven_path}")  # → .../predictions/10000_3.7_0.0.7
+
+### Create TLUSTY input file (.5 format)
+
+from tlustynn import create_ff_model
+
+# Generate a TLUSTY input model file (fort.5 format)
+create_ff_model(
+    output_dir='/path/to/workdir',
+    teff=10000,
+    logg=3.7,
+    mh=0.0,
+    lte_flag='F',
+    ltgray_flag='F',
+    nstmode='nst',
+    frequency=2000,
+    natoms_num=8
 )
-```
 
-### Get a DataFrame without saving
 
-```python
-df, _ = predict_atmosphere(10000, 3.7, 0.0)
-print(df.shape)   # (50, 62)  → 50 depth layers × 62 columns
-print(df.columns.tolist())
-```
-
-### Use the object-oriented API
-
-```python
-from tlustynn import TlustyAtmosphere
-
-atm = TlustyAtmosphere()
-df, paths = atm.predict(10000, 3.7, 0.0, output_dir="./predictions")
-```
-
----
 
 ## 📄 Output formats
 
@@ -130,6 +121,9 @@ The `.7` file is a plain-text model atmosphere in the standard TLUSTY `fort.7` f
 - **Remaining lines**: for each depth, the 58 parameters (`T`, `ne`, `rho`, `level_1` … `level_55`), 6 per line
 
 ---
+
+
+
 
 ## 🔬 Training your own model
 
