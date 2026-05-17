@@ -11,7 +11,7 @@ Given three stellar parameters — **effective temperature (Teff)**, **surface g
 ### Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/tlusty-nn.git
+git clone https://github.com/JqRambo/tlusty-nn.git
 cd tlusty-nn
 ```
 
