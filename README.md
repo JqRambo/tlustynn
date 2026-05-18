@@ -15,7 +15,7 @@ git clone https://github.com/JqRambo/tlusty-nn.git
 cd tlusty-nn
 ```
 
-### Note
+### Important Notes
 
 Please note that this code has not been peer-reviewed.  
 
@@ -132,8 +132,6 @@ The `.7` file is a plain-text model atmosphere in the standard TLUSTY `fort.7` f
 ---
 
 
-
-
 ## 🔬 Training your own model
 
 If you have the full `hhe.csv` dataset (~2.5 GB), you can re-train or fine-tune the network:
@@ -182,6 +180,23 @@ tlusty-nn/
 
 All dependencies are listed in `requirements.txt` and will be installed automatically with `pip install`.
 ---
+
+## 🎯 Applicability Range
+
+The neural network model is trained and validated within the following stellar parameter ranges:
+
+| Parameter | Symbol | Range | Units |
+|-----------|--------|-------|-------|
+| Effective temperature | `Teff` | 10,000 – 100,000 | K |
+| Surface gravity | `logg` | 1.5 – 9.0 | log10(cm/s²) |
+| Helium abundance | `log(n_He / n_H)` | -4.0 – 0.0 | dex |
+
+### Notes
+
+- **Extrapolation warning**: Predictions made outside the above ranges may be physically inaccurate or unreliable. The network has not been trained on data beyond these bounds.
+- **Metallicity**: Currently, the model assumes solar metallicity (`mh = 0.0` in the API). Support for varying metallicity will be added in future versions.
+- **Intended use**: This model is designed for rapid prototyping, parameter space exploration, and applications where TLUSTY runtime is prohibitive. For final scientific results requiring high precision, please validate against full TLUSTY calculations.
+
 
 
 ## Acknowledgements
