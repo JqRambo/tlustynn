@@ -1,3 +1,8 @@
+Neural Network for fast prediction of TLUSTY stellar atmosphere models.
+
+
+
+
 # Teddy Is All You Need
 
 
