@@ -14,7 +14,7 @@ Given three stellar parameters — effective temperature (Teff), surface gravity
 ### Clone the repository
 
 ```bash
-git clone https://github.com/JqRambo/tlusty-nn.git
+git clone https://github.com/JqRambo/teddy.git
 cd tlusty-nn
 ```
 
