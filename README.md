@@ -1,3 +1,6 @@
+### Teddy is all you need
+
+
 # TLUSTY NN
 
 Neural Network for fast prediction of TLUSTY stellar atmosphere models.
@@ -19,7 +22,7 @@ cd tlusty-nn
 
 Please note that this code has not been peer-reviewed.  
 
-> If you intend to use it, please contact the author, Dr. Jia Qi (jq.physics@hotmail.com).  
+> If you intend to use it, please contact the author, Dr. Qi Jia (jq.physics@hotmail.com).  
 
 > The pretrained model weight (`best_model.pt`, ~1 GB) exceeds GitHub's normal file-size limit (100 MB).
   Please reach out to Dr. Jia Qi (jq.physics@hotmail.com) to request access.
@@ -201,4 +204,4 @@ The neural network model is trained and validated within the following stellar p
 
 ## Acknowledgements
 
-Thanks to Dr. Jiao Li, Dr. Jiadong Lee, Dr. Mingjie Jian, Dr. Yangping Luo, Dr. Chenyu He , Dr Zhihong He and Dr. Xiaodian Chen for their assistance with this project.
+Thanks to Dr. Jiao Li, Dr. Jiadong Lee, Dr. Mingjie Jian, Dr. Yangping Luo, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
