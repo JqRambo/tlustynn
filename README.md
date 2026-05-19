@@ -1,4 +1,4 @@
-# Teddy is all you need
+# Teddy Is All You Need
 
 
 ## TLUSTY NN
