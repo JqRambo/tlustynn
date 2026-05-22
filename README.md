@@ -5,9 +5,9 @@ Neural Network for fast prediction of TLUSTY stellar atmosphere models.
 Given three stellar parameters — effective temperature (Teff), surface gravity (logg) and helium abundance (log(n_He / n_H)) — the network predicts the full 50-layer atmospheric structure (temperature, electron density, mass density, and 55 level populations) in a fraction of a second.
 
 
-# Installation
+## Installation
 
-# Clone the repository
+### Clone the repository
 
 ```bash
 git clone https://github.com/JqRambo/tlustynn.git
@@ -24,7 +24,7 @@ Please note that this code has not been peer-reviewed.
   Please reach out to Dr. Qi Jia(jq.physics@hotmail.com) to request access.
 
 
-# Install into your Python environment
+## Install into your Python environment
 
 ```bash
 pip install .
@@ -37,9 +37,9 @@ import tlustynn
 ```
 
 
-#Quick Start
+## Quick Start
 
-# Predict a single atmosphere model
+## Predict a single atmosphere model
 
 ```python
 from tlustynn import predict_atmosphere
@@ -59,7 +59,7 @@ print(f"DataFrame shape: {df.shape}")  # (50, 58) → 50 depths × 58 parameters
 
 The default file names follow the format **`{teff}_{logg}_{mh}.csv`** and **`{teff}_{logg}_{mh}.7`**.
 
-# Predict and save as TLUSTY .7 format (fort.7)
+### Predict and save as TLUSTY .7 format (fort.7)
 
 ```python
 df, seven_path = predict_atmosphere(
@@ -73,7 +73,7 @@ df, seven_path = predict_atmosphere(
 print(f".7 file saved to: {seven_path}")  # → .../predictions/10000_3.7_0.0.7
 ```
 
-# Create TLUSTY input file (.5 format)
+### Create TLUSTY input file (.5 format)
 
 ```python
 from tlustynn import create_ff_model
@@ -93,9 +93,9 @@ create_ff_model(
 ```
 
 
-#  Output formats
+##  Output formats
 
-# CSV format
+### CSV format
 
 The output CSV follows exactly the same column order as the original `hhe.csv` training data:
 
@@ -112,7 +112,7 @@ The output CSV follows exactly the same column order as the original `hhe.csv` t
 
 Each file contains **50 rows**, one per atmospheric depth layer.
 
-# TLUSTY `.7` format
+### TLUSTY `.7` format
 
 The `.7` file is a plain-text model atmosphere in the standard TLUSTY `fort.7` format (identical to `FF.7`):
 
