@@ -3,6 +3,13 @@ Neural Network for fast prediction of TLUSTY stellar atmosphere models.
 
 
 
+# Please Cite
+
+# TLUSTY NN
+Neural Network for fast prediction of TLUSTY stellar atmosphere models.
+
+
+
 
 
 
