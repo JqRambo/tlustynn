@@ -2,21 +2,7 @@
 Neural Network for fast prediction of TLUSTY stellar atmosphere models.
 
 
-
-# Please Cite
-
-# TLUSTY NN
-Neural Network for fast prediction of TLUSTY stellar atmosphere models.
-
-
-
-
-
-
-
-# Introduction
 Given three stellar parameters — effective temperature (Teff), surface gravity (logg) and helium abundance (log(n_He / n_H)) — the network predicts the full 50-layer atmospheric structure (temperature, electron density, mass density, and 55 level populations) in a fraction of a second.
-
 
 
 # Installation
