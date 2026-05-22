@@ -1,4 +1,5 @@
 # Teddy Is All You Need
+
 Neural Network for fast prediction of TLUSTY stellar atmosphere models.
 
 
@@ -8,7 +9,7 @@ Given three stellar parameters — effective temperature (Teff), surface gravity
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### Clone the repository
 
@@ -41,7 +42,7 @@ import tlustynn
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Predict a single atmosphere model
 
@@ -134,7 +135,7 @@ The `.7` file is a plain-text model atmosphere in the standard TLUSTY `fort.7` f
 ---
 
 
-## 🔬 Training your own model
+## Training your own model
 
 If you have the full `hhe.csv` dataset (~2.5 GB), you can re-train or fine-tune the network:
 
@@ -174,7 +175,7 @@ tlusty-nn/
 
 ---
 
-## 📋 Requirements
+## Requirements
 
 - Python ≥ 3.9
 - PyTorch ≥ 2.0
