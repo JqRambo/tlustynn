@@ -127,6 +127,52 @@ create_ff_model(
 ```
 
 
+### Synthesize a spectrum
+
+After predicting the atmosphere model, you can directly call **SYNSPEC** through the high-level API to synthesize a synthetic spectrum for a given wavelength range.
+
+```python
+from tlustynn import synthesize_spectrum
+
+# Synthesize a H/He spectrum and save as CSV
+spec_path = synthesize_spectrum(
+    teff=45000,        # Effective temperature [K]
+    logg=4.0,          # Surface gravity
+    mh=0.0,            # Metallicity [dex]
+    spec_dir="./spec", # Working directory for TLUSTY/SYNSPEC I/O
+    linelist="hhe",    # Line list: "hhe" (H/He only) or "multi" (full atomic)
+    down=3600,         # Lower wavelength bound [Å]
+    up=7500,           # Upper wavelength bound [Å]
+    format="csv"       # Output format: "csv" or "fits"
+)
+
+print(f"Spectrum saved to: {spec_path}")
+```
+
+Set `plot=True` to automatically generate a `spec.pdf` figure in the same directory:
+
+```python
+spec_path = synthesize_spectrum(
+    teff=45000, logg=4.0, mh=0.0,
+    spec_dir="./spec",
+    linelist="hhe",
+    down=3600, up=7500,
+    format="fits",
+    plot=True
+)
+```
+
+**What happens under the hood**
+
+1. Generates the TLUSTY input model (`fort.5`) via `create_ff_model()`.
+2. Predicts the 50-layer atmosphere and writes it in TLUSTY `.7` format.
+3. Creates the SYNSPEC control file (`fort.55.lin`).
+4. Runs the SYNSPEC executable (`$TLUSTY/RSynspec`).
+5. Reads the raw spectrum, converts it to the requested format (CSV or FITS), and optionally plots it.
+
+> **Prerequisite**: TLUSTY must be installed and the environment variable `$TLUSTY` must point to the installation directory (see [Installation](#installation) above).
+
+
 ##  Output formats
 
 ### CSV format
@@ -183,7 +229,7 @@ Trained checkpoints will be saved to `./checkpoints/` by default.
 tlusty-nn/
 ├── tlustynn/                 # Main Python package
 │   ├── __init__.py
-│   ├── api.py                # User-facing predict_atmosphere() API
+│   ├── api.py                # User-facing predict_atmosphere() & synthesize_spectrum() API
 │   ├── model.py              # TLUSTYNN network definition
 │   ├── predict.py            # TlustyPredictor (model loading & inference)
 │   ├── data_loader.py        # Dataset & preprocessing

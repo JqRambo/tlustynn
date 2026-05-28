@@ -14,6 +14,21 @@ import numpy as np
 import pandas as pd
 
 from .predict import TlustyPredictor
+import matplotlib
+import matplotlib.pyplot as plt
+import os
+import subprocess
+import sys
+import numpy as np
+import pandas as pd
+import shutil
+import glob
+import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from astropy.io import fits
+
+
 
 
 # Singleton predictor instance (lazy initialization)
@@ -452,4 +467,199 @@ class TlustyAtmosphere:
         return df, filepath
     
 
+
+def create_fort55_lin(output_dir, filename,
+                     imode, idstd, iprin,
+                     inmod, intrpl, ichang, ichemc,
+                     iophli, nunalp, nunbet, nungam, nunbal,
+                     ifreq, inlte, icontl, inlist, ifhe2,
+                     ihydpr, ihe1pr, ihe2pr,
+                     alam0, alast, cutof0, cutofs, relop, space,
+                     nmlist,iunitm):
+
+    output_path = os.path.join(output_dir, filename)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
+    with open(output_path, 'w') as f:
+        # 第一行: imode idstd iprin
+        f.write(f"{imode:8d} {idstd:7d} {iprin:7d}                                ! tmode,idstd,tprin\n")
+        
+        # 第二行: inmod intrpl ichang ichemc
+        f.write(f"{inmod:8d} {intrpl:7d} {ichang:7d} {ichemc:7d}                        ! tnmod,intrpl,ichang,ichemc\n")
+        
+        # 第三行: iophli nunalp nunbet nungam nunbal
+        f.write(f"{iophli:8d} {nunalp:7d} {nunbet:7d} {nungam:7d} {nunbal:7d}                ! tophlt,nunalp,nunbet,nungan,nunbal\n")
+        
+        # 第四行: ifreq inlte icontl inlist ifhe2
+        f.write(f"{ifreq:8d} {inlte:7d} {icontl:7d} {inlist:7d} {ifhe2:7d}                ! tfreq,inite,icontl,inlist,tfhe2\n")
+          
+        # 第五行: ihydpr ihe1pr ihe2pr
+        f.write(f"{ihydpr:8d} {ihe1pr:7d} {ihe2pr:7d}                                ! thydpr,the1pr,the2pr\n")
+        
+        # 第六行: alam0 alast cutof0 cutofs relop space
+        f.write(f"    {alam0:.0f}    {alast:.0f}       {cutof0:.0f}       {cutofs:.0f}  {relop}    {space}\n")    
+            
+        # 第七行: nmlist
+        f.write(f"{nmlist:8d}{iunitm:8d}                                        ! nnlist\n")
+
+
+
+def run_synspec(synspec_dir, model_name,linelist_file):
+
+    command = ["$TLUSTY/RSynspec", model_name, "fort.55.lin", linelist_file]
+    
+    try:
+        result = subprocess.run(
+            ' '.join(command), 
+            shell=True, 
+            capture_output=True, 
+            text=True, 
+            check=True,
+            cwd=synspec_dir
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print("Synspec failed!")
+        print("Error:", e.stderr)
+        return False
+
+
+
+
+
+def synthesize_spectrum(teff, logg, mh, spec_dir, linelist, down, up, format, plot=False):
+    
+    create_ff_model(spec_dir, teff, logg, mh, lte_flag='F', ltgray_flag='F', nstmode='nst', frequency=2000, natoms_num=8)
+    
+    predict_atmosphere(teff, logg, mh, output_dir=spec_dir, output_format='7')
+    
+    if linelist == "hhe":
+        create_fort55_lin(spec_dir, "fort.55.lin",
+            imode=0, idstd=34, iprin=1,           
+            inmod=1, intrpl=0, ichang=0, ichemc=0,
+            iophli=0, nunalp=0, nunbet=0, nungam=0, nunbal=0,          
+            ifreq=1, inlte=1, icontl=0, inlist=0, ifhe2=0,         
+            ihydpr=0, ihe1pr=0, ihe2pr=0,         
+            alam0=down, alast=up, cutof0=10, cutofs=0.0, relop=0.0001, space=0.01,
+            nmlist=0, iunitm=0)
+        
+        run_synspec(spec_dir, f"{teff}_{logg}_{mh}", "data/linelist.test")
+        
+        spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{mh}.spec")  
+
+        if not os.path.exists(spec_file):
+            spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{mh}.spec")
+        
+        if os.path.exists(spec_file):
+            spec = pd.read_csv(spec_file, sep='\s+', header=None, names=['waveobs', 'flux'])
+
+            if plot:
+                output_file=os.path.join(os.path.abspath(spec_dir), f'spec.pdf')
+
+                fig, ax =plt.subplots(figsize=(10, 5),dpi=300)
+
+                ax.plot(spec['waveobs'], spec['flux'], color='r', linestyle='-', linewidth=0.6)
+                ax.set_xlabel('Wavelength (Å)', fontsize=12)
+                ax.set_ylabel('Flux', fontsize=12)
+                ax.tick_params(axis='both', which='major', labelsize=8)
+                ax.set_xlim(3600, 7500)
+                ax.set_ylim(None, None)
+
+                fig.savefig(output_file, dpi=600, bbox_inches='tight')
+                plt.close()
+            else:
+                pass
+        else:
+            raise FileNotFoundError(f"Spectrum output file not found in {spec_dir}")
+        
+
+        if format == "csv":
+            filename = f"{teff}_{logg}_{mh}.csv"
+            filepath = os.path.join(os.path.abspath(spec_dir), filename)
+            spec.to_csv(filepath, index=False)
+        else: 
+            
+            filename = f"{teff}_{logg}_{mh}.fits"
+            filepath = os.path.join(os.path.abspath(spec_dir), filename)
+            
+            col1 = fits.Column(name='waveobs', format='E', array=spec['waveobs'].values)
+            col2 = fits.Column(name='flux', format='E', array=spec['flux'].values)
+            
+            hdu = fits.BinTableHDU.from_columns([col1, col2])
+            
+            hdu.header['TEFF'] = (teff, 'Effective Temperature (K)')
+            hdu.header['LOGG'] = (logg, 'Surface Gravity (log10 cm/s^2)')
+            hdu.header['MH'] = (mh, 'Metallicity (dex)')
+            hdu.header['LINELIST'] = (linelist, 'Line list used')
+            hdu.header['WAVEMIN'] = (down, 'Minimum wavelength (Angstrom)')
+            hdu.header['WAVEMAX'] = (up, 'Maximum wavelength (Angstrom)')
+            hdu.writeto(filepath, overwrite=True)
+            
+
+
+    elif linelist == 'multi':
+        create_fort55_lin(spec_dir, "fort.55.lin",
+            imode=0, idstd=50, iprin=1,           
+            inmod=1, intrpl=0, ichang=0, ichemc=0,
+            iophli=0, nunalp=0, nunbet=0, nungam=0, nunbal=0,          
+            ifreq=1, inlte=1, icontl=0, inlist=0, ifhe2=0,         
+            ihydpr=0, ihe1pr=0, ihe2pr=0,         
+            alam0=down, alast=up, cutof0=10, cutofs=0.0, relop=0.0001, space=0.5,
+            nmlist=0, iunitm=0)
+        
+        run_synspec(spec_dir, f"{teff}_{logg}_{mh}", "data/gfATO.dat")
+        
+        spec_file = os.path.join(spec_dir, ".spec")
+        if not os.path.exists(spec_file):
+            spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{mh}.spec")
+        
+        if os.path.exists(spec_file):
+            spec = pd.read_csv(spec_file, sep='\s+', header=None, names=['waveobs', 'flux'])
+
+            if plot:
+
+                output_file=os.path.join(os.path.abspath(spec_dir), f'spec.pdf')
+
+                fig, ax =plt.subplots(figsize=(10, 5), dpi=300)
+                
+                ax.plot(spec['waveobs'], spec['flux'], color='r', linestyle='-', linewidth=0.6)
+                ax.set_xlabel('Wavelength (Å)', fontsize=12)
+                ax.set_ylabel('Flux', fontsize=12)
+                ax.legend(loc='upper right', fontsize=10)
+                ax.tick_params(axis='both', which='major', labelsize=8)
+                ax.set_xlim(3600, 7500)
+                ax.set_ylim(None, None)
+
+                fig.savefig(output_file, dpi=600, bbox_inches='tight')
+                plt.close()
+            else:
+                pass
+
+        else:
+            raise FileNotFoundError(f"Spectrum output file not found in {spec_dir}")
+        
+        if format == "csv":
+            filename = f"{teff}_{logg}_{mh}.csv"
+            filepath = os.path.join(os.path.abspath(spec_dir), filename)
+            spec.to_csv(filepath, index=False)
+
+        else:  
+            filename = f"{teff}_{logg}_{mh}.fits"
+            filepath = os.path.join(os.path.abspath(spec_dir), filename)
+            
+            col1 = fits.Column(name='waveobs', format='E', array=spec['waveobs'].values)
+            col2 = fits.Column(name='flux', format='E', array=spec['flux'].values)
+            
+            hdu = fits.BinTableHDU.from_columns([col1, col2])
+            
+            hdu.header['TEFF'] = (teff, 'Effective Temperature (K)')
+            hdu.header['LOGG'] = (logg, 'Surface Gravity (log10 cm/s^2)')
+            hdu.header['MH'] = (mh, 'Metallicity (dex)')
+            hdu.header['LINELIST'] = (linelist, 'Line list used')
+            hdu.header['WAVEMIN'] = (down, 'Minimum wavelength (Angstrom)')
+            hdu.header['WAVEMAX'] = (up, 'Maximum wavelength (Angstrom)')
+            
+            hdu.writeto(filepath, overwrite=True)
+    
+    return filepath  

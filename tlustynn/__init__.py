@@ -9,11 +9,12 @@ Quick start
 """
 
 from ._version import __version__
-from .api import predict_atmosphere, TlustyAtmosphere,create_ff_model
+from .api import predict_atmosphere, TlustyAtmosphere, create_ff_model,synthesize_spectrum
 
 __all__ = [
     "__version__",
     "predict_atmosphere",
     "TlustyAtmosphere",
     "create_ff_model",
+    "synthesize_spectrum"
 ]
