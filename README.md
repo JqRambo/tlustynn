@@ -52,7 +52,7 @@ source ~/.bashrc
 
 Please note that this code has not been peer-reviewed.  
 
-> If you intend to use it, please contact the author, Dr. Qi Jia (jq.physics@hotmail.com).  
+> If you intend to use it, please contact the author, Dr. Jiao Li (lijiao@nao.cas.cn).  
 
 > The pretrained model weight (`best_model.pt`, ~1 GB) exceeds GitHub's normal file-size limit (100 MB).
   Please reach out to Dr. Qi Jia(jq.physics@hotmail.com) to request access.
@@ -233,4 +233,4 @@ The neural network model is trained and validated within the following stellar p
 
 ## Acknowledgements
 
-Thanks to Dr. Jiao Li, Dr. Jiadong Li, Dr. Mingjie Jian, Dr. Yangping Luo, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
+Thanks to Dr. Jiao Li, Dr. Jiadong Li, Dr. Yangping Luo, Dr. Mingjie Jian, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
