@@ -183,7 +183,7 @@ The output CSV follows exactly the same column order as the original `hhe.csv` t
 |--------|-------------|
 | `teff` | Effective temperature [K] (replicated for all 50 rows) |
 | `logg` | Surface gravity (replicated) |
-| `mh`   | Metallicity [dex] (replicated) |
+| `log(n_He/n_H)`   | helium abundance [dex] (replicated) |
 | `tau`  | Optical depth (average profile in physical units) |
 | `T`    | Temperature [K] |
 | `ne`   | Electron number density [cm⁻³] |
