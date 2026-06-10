@@ -272,11 +272,11 @@ The neural network model is trained and validated within the following stellar p
 ## Notes
 
 - **Extrapolation warning**: Predictions made outside the above ranges may be physically inaccurate or unreliable. The network has not been trained on data beyond these bounds.
-- **Metallicity**: Currently, the model assumes solar metallicity (`mh = 0.0` in the API). Support for varying metallicity will be added in future versions.
+- **Helium abundance**: Currently, the model assumes solar Helium abundance (`logg(n_He/n_H) = 0.1` in the API). 
 - **Intended use**: This model is designed for rapid prototyping, parameter space exploration, and applications where TLUSTY runtime is prohibitive. For final scientific results requiring high precision, please validate against full TLUSTY calculations.
 
 
 
 ## Acknowledgements
 
-Thanks to Dr. Jiao Li, Dr. Jiadong Li, Dr. Yangping Luo, Dr. Xiao Han, Dr. Mingjie Jian, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
+Thanks to Dr. Jiao Li, Dr. Jiadong Li, Dr. Mingjie Jian, Dr. Yangping Luo, Dr. Xiao Han, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
