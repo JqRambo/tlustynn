@@ -1,10 +1,13 @@
+
+
+
 # TLUSTY NN
 Neural Network for fast prediction of TLUSTY stellar atmosphere models.
 
+![Comparison of LAMOST observed spectra (black) with TLUSTY-NN predictions (red) and full TLUSTY+SYNSPEC calculations (green) for an sdB star and an ELM white dwarf](figs/sdb_wd.png)
+
 
 Given three stellar parameters — effective temperature (Teff), surface gravity (logg), and helium abundance (log(n_He / n_H)) — the network predicts the full 50-layer atmospheric structure, including temperature, electron density, mass density, and 55 level populations, in under one second.
-
-![Comparison of LAMOST observed spectra (black) with TLUSTY-NN predictions (red) and full TLUSTY+SYNSPEC calculations (green) for an sdB star and an ELM white dwarf](figs/sdb_wd.png)
 
 
 ## Installation
