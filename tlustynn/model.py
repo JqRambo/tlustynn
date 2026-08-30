@@ -69,12 +69,12 @@ class ResidualBlock(nn.Module):
 class TLUSTYNN(nn.Module):
     """TLUSTY 大气模型 NN
 
-    输入：teff, logg, mh（3个恒星参数）+ tau（光深，作为逐层输入）
+    输入：teff, logg, log_he_h（3个恒星参数）+ mass（光深，作为逐层输入）
     输出：T, ne, rho, level_1...level_55（每层的58个大气参数）
     """
     def __init__(self, 
                  input_dim=3,          # 3 个恒星参数
-                 output_dim=58,        # T + ne + rho + 55 能级（tau 作为输入）
+                 output_dim=58,        # T + ne + rho + 55 能级（mass 作为输入）
                  n_depths=50,
                  hidden_layers=None,
                  activation='silu',
@@ -98,7 +98,7 @@ class TLUSTYNN(nn.Module):
         if hidden_layers is None:
             hidden_layers = [1024, 2048, 4096, 4096, 2048, 1024, 512]
         
-        # 恒星参数维度 = 输入维度（因为 tau 不再是输入）
+        # 恒星参数维度 = 输入维度（因为 mass 不再是输入）
         self.stellar_dim = input_dim
         
         if use_fourier:
@@ -143,22 +143,22 @@ class TLUSTYNN(nn.Module):
         self.output_bias = nn.Parameter(torch.zeros(output_dim))
         self.output_activation = nn.Tanh()
     
-    def forward(self, stellar_params, tau=None, depth=None):
+    def forward(self, stellar_params, mass=None, depth=None):
         """前向传播
         
         Args:
             stellar_params: [batch, 3] 恒星参数（已归一化到 [-1, 1]）
-            tau: [batch, 50] 光深（已归一化到 [-1, 1]），优先使用
-            depth: [batch, 50] 深度编码（可选，tau 为 None 时回退使用层索引）
+            mass: [batch, 50] 光深（已归一化到 [-1, 1]），优先使用
+            depth: [batch, 50] 深度编码（可选，mass 为 None 时回退使用层索引）
         
         Returns:
             y: [batch, 50, output_dim] 预测的大气参数（归一化到 [-1, 1]）
         """
         if self.use_checkpoint and self.training:
-            return self._forward_impl(stellar_params, tau, depth, use_checkpoint=True)
-        return self._forward_impl(stellar_params, tau, depth, use_checkpoint=False)
+            return self._forward_impl(stellar_params, mass, depth, use_checkpoint=True)
+        return self._forward_impl(stellar_params, mass, depth, use_checkpoint=False)
     
-    def _forward_impl(self, stellar_params, tau, depth, use_checkpoint=False):
+    def _forward_impl(self, stellar_params, mass, depth, use_checkpoint=False):
         batch_size = stellar_params.shape[0]
         
         # 扩展恒星参数到每个深度层
@@ -173,10 +173,10 @@ class TLUSTYNN(nn.Module):
         else:
             stellar_encoded = stellar_params
         
-        # 深度编码：优先使用 tau（光深），否则回退到 depth
-        if tau is not None:
-            # tau 已经是归一化到 [-1, 1] 的值，直接映射到 [0, 1] 后编码
-            depth_norm = (tau + 1.0) / 2.0
+        # 深度编码：优先使用 mass（光深），否则回退到 depth
+        if mass is not None:
+            # mass 已经是归一化到 [-1, 1] 的值，直接映射到 [0, 1] 后编码
+            depth_norm = (mass + 1.0) / 2.0
             depth_norm = torch.clamp(depth_norm, 0.0, 1.0)
             depth_norm = depth_norm.reshape(batch_size * self.n_depths, 1)
             depth_encoded = self.depth_encoding(depth_norm)
@@ -215,19 +215,19 @@ class TLUSTYNN(nn.Module):
         
         return y
     
-    def predict_single(self, teff, logg, mh, tau=None):
+    def predict_single(self, teff, logg, log_he_h, mass=None):
         """预测单个恒星模型（物理单位输入）
         
         Args:
-            teff, logg, mh: 恒星参数（物理单位）
-            tau: [50] 光深（归一化到 [-1,1]），None 时使用默认层索引
+            teff, logg, log_he_h: 恒星参数（物理单位）
+            mass: [50] 光深（归一化到 [-1,1]），None 时使用默认层索引
         """
         device = next(self.parameters()).device
-        x = torch.tensor([[teff, logg, mh]], dtype=torch.float32, device=device)
-        if tau is not None:
-            tau = torch.tensor(tau, dtype=torch.float32, device=device).unsqueeze(0)
+        x = torch.tensor([[teff, logg, log_he_h]], dtype=torch.float32, device=device)
+        if mass is not None:
+            mass = torch.tensor(mass, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
-            return self.forward(x, tau=tau).cpu().numpy()[0]
+            return self.forward(x, mass=mass).cpu().numpy()[0]
 
 
 def create_model(model_type='mlp', **kwargs):

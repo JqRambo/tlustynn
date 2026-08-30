@@ -133,10 +133,10 @@ class Trainer:
             x = batch['x'].to(self.device, non_blocking=True)
             y_true = batch['y'].to(self.device, non_blocking=True)
 
-            if 'tau' in batch:
-                tau = batch['tau'].to(self.device, non_blocking=True)
+            if 'M' in batch:
+                mass = batch['M'].to(self.device, non_blocking=True)
             else:
-                tau = None
+                mass = None
 
             if 'depth' in batch:
                 depth = batch['depth'].to(self.device, non_blocking=True)
@@ -147,7 +147,7 @@ class Trainer:
 
             if self.use_amp:
                 with autocast():
-                    y_pred = self.model(x, tau=tau, depth=depth)
+                    y_pred = self.model(x, mass=mass, depth=depth)
                     loss = self.compute_loss(y_pred, y_true)
 
                 if not torch.isfinite(loss):
@@ -166,7 +166,7 @@ class Trainer:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
-                y_pred = self.model(x, tau=tau, depth=depth)
+                y_pred = self.model(x, mass=mass, depth=depth)
                 loss = self.compute_loss(y_pred, y_true)
 
                 if not torch.isfinite(loss):
@@ -220,10 +220,10 @@ class Trainer:
             x = batch['x'].to(self.device, non_blocking=True)
             y_true = batch['y'].to(self.device, non_blocking=True)
 
-            if 'tau' in batch:
-                tau = batch['tau'].to(self.device, non_blocking=True)
+            if 'M' in batch:
+                mass = batch['M'].to(self.device, non_blocking=True)
             else:
-                tau = None
+                mass = None
 
             if 'depth' in batch:
                 depth = batch['depth'].to(self.device, non_blocking=True)
@@ -232,10 +232,10 @@ class Trainer:
 
             if self.use_amp:
                 with autocast():
-                    y_pred = self.model(x, tau=tau, depth=depth)
+                    y_pred = self.model(x, mass=mass, depth=depth)
                     loss = self.compute_loss(y_pred, y_true)
             else:
-                y_pred = self.model(x, tau=tau, depth=depth)
+                y_pred = self.model(x, mass=mass, depth=depth)
                 loss = self.compute_loss(y_pred, y_true)
 
             if not torch.isfinite(loss):

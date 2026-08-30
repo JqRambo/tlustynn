@@ -6,11 +6,11 @@ import torch
 try:
     from .data_loader import round_to_dataset_grid
 except ImportError:
-    def round_to_dataset_grid(teff, logg, mh):
+    def round_to_dataset_grid(teff, logg, log_he_h):
         teff_r = np.round(teff / 500.0) * 500.0
         logg_r = np.round(logg / 0.1) * 0.1
-        mh_r = np.round(mh / 0.5) * 0.5
-        return teff_r, logg_r, mh_r
+        log_he_h_r = np.round(log_he_h / 0.5) * 0.5
+        return teff_r, logg_r, log_he_h_r
 
 COLORS = {
     'true': '#2E86AB',      
@@ -40,9 +40,9 @@ def _get_var_indices(stats):
     return 0, 1, 2 
 
 
-def _format_model_title(teff, logg, mh):
-    teff_r, logg_r, mh_r = round_to_dataset_grid(teff, logg, mh)
-    return f"Teff={teff_r:.0f}K, logg={logg_r:.2f}, [M/H]={mh_r:+.2f}"
+def _format_model_title(teff, logg, log_he_h):
+    teff_r, logg_r, log_he_h_r = round_to_dataset_grid(teff, logg, log_he_h)
+    return f"Teff={teff_r:.0f}K, logg={logg_r:.2f}, [M/H]={log_he_h_r:+.2f}"
 
 
 
@@ -57,20 +57,20 @@ def create_single_model_plot(predictions, targets, inputs, idx, output_dir, stat
     
     teff = float(inputs_np[idx, 0])
     logg = float(inputs_np[idx, 1])
-    mh = float(inputs_np[idx, 2])
+    log_he_h = float(inputs_np[idx, 2])
     
     depth = np.arange(1, 51)
     
     idx_T, idx_ne, idx_rho = _get_var_indices(stats)
     
-    teff_r, logg_r, mh_r = round_to_dataset_grid(teff, logg, mh)
+    teff_r, logg_r, log_he_h_r = round_to_dataset_grid(teff, logg, log_he_h)
     info_text = (
         f"Teff = {teff_r:,.0f} K\n"
         f"log g = {logg_r:.2f}\n"
-        f"log(nHe/nH) = {mh_r:+.2f}")
+        f"log(nHe/nH) = {log_he_h_r:+.2f}")
     
-    if abs(teff - teff_r) > 0.1 or abs(logg - logg_r) > 0.01 or abs(mh - mh_r) > 0.01:
-        info_text += f"\n\n(Original: {teff:.0f}, {logg:.2f}, {mh:+.2f})"
+    if abs(teff - teff_r) > 0.1 or abs(logg - logg_r) > 0.01 or abs(log_he_h - log_he_h_r) > 0.01:
+        info_text += f"\n\n(Original: {teff:.0f}, {logg:.2f}, {log_he_h:+.2f})"
     
     y_true_T = targets[idx, :, idx_T].numpy()
     y_pred_T = predictions[idx, :, idx_T].numpy()
@@ -148,8 +148,8 @@ def create_multi_model_comparison(predictions, targets, inputs, indices, output_
     idx_1 = indices[0]
     teff_1 = inputs[idx_1, 0].item()
     logg_1 = inputs[idx_1, 1].item()
-    mh_1 = inputs[idx_1, 2].item()
-    teff_r_1, logg_r_1, mh_r_1 = round_to_dataset_grid(teff_1, logg_1, mh_1)
+    log_he_h_1 = inputs[idx_1, 2].item()
+    teff_r_1, logg_r_1, log_he_h_r_1 = round_to_dataset_grid(teff_1, logg_1, log_he_h_1)
     
     # Model 1 - Temperature
     ax_1_T = plt.subplot(n_models, 3, 1)
@@ -161,7 +161,7 @@ def create_multi_model_comparison(predictions, targets, inputs, indices, output_
     ax_1_T.set_xlabel('Depth Layer')
     ax_1_T.set_ylabel('Temperature [K]')
     ax_1_T.set_yscale('linear')
-    ax_1_T.text(0.04, 0.90, _format_model_title(teff_1, logg_1, mh_1), transform=ax_1_T.transAxes, ha='left', va='top', fontsize=12)
+    ax_1_T.text(0.04, 0.90, _format_model_title(teff_1, logg_1, log_he_h_1), transform=ax_1_T.transAxes, ha='left', va='top', fontsize=12)
     ax_1_T.legend(loc='upper right')
     
     # Model 1 - Electron Density
@@ -192,8 +192,8 @@ def create_multi_model_comparison(predictions, targets, inputs, indices, output_
     idx_2 = indices[1]
     teff_2 = inputs[idx_2, 0].item()
     logg_2 = inputs[idx_2, 1].item()
-    mh_2 = inputs[idx_2, 2].item()
-    teff_r_2, logg_r_2, mh_r_2 = round_to_dataset_grid(teff_2, logg_2, mh_2)
+    log_he_h_2 = inputs[idx_2, 2].item()
+    teff_r_2, logg_r_2, log_he_h_r_2 = round_to_dataset_grid(teff_2, logg_2, log_he_h_2)
     
     # Model 2 - Temperature
     ax_2_T = plt.subplot(n_models, 3, 4)
@@ -205,7 +205,7 @@ def create_multi_model_comparison(predictions, targets, inputs, indices, output_
     ax_2_T.set_xlabel('Depth Layer')
     ax_2_T.set_ylabel('Temperature [K]')
     ax_2_T.set_yscale('linear')
-    ax_2_T.text(0.04, 0.90, _format_model_title(teff_2, logg_2, mh_2), transform=ax_2_T.transAxes, ha='left', va='top', fontsize=12)
+    ax_2_T.text(0.04, 0.90, _format_model_title(teff_2, logg_2, log_he_h_2), transform=ax_2_T.transAxes, ha='left', va='top', fontsize=12)
     
     # Model 2 - Electron Density
     ax_2_ne = plt.subplot(n_models, 3, 5)
@@ -236,8 +236,8 @@ def create_multi_model_comparison(predictions, targets, inputs, indices, output_
         idx_3 = indices[2]
         teff_3 = inputs[idx_3, 0].item()
         logg_3 = inputs[idx_3, 1].item()
-        mh_3 = inputs[idx_3, 2].item()
-        teff_r_3, logg_r_3, mh_r_3 = round_to_dataset_grid(teff_3, logg_3, mh_3)
+        log_he_h_3 = inputs[idx_3, 2].item()
+        teff_r_3, logg_r_3, log_he_h_r_3 = round_to_dataset_grid(teff_3, logg_3, log_he_h_3)
         
         # Model 3 - Temperature
         ax_3_T = plt.subplot(n_models, 3, 7)
@@ -249,7 +249,7 @@ def create_multi_model_comparison(predictions, targets, inputs, indices, output_
         ax_3_T.set_xlabel('Depth Layer')
         ax_3_T.set_ylabel('Temperature [K]')
         ax_3_T.set_yscale('linear')
-        ax_3_T.text(0.04, 0.90, _format_model_title(teff_3, logg_3, mh_3), transform=ax_3_T.transAxes, ha='left', va='top', fontsize=12)
+        ax_3_T.text(0.04, 0.90, _format_model_title(teff_3, logg_3, log_he_h_3), transform=ax_3_T.transAxes, ha='left', va='top', fontsize=12)
         
         # Model 3 - Electron Density
         ax_3_ne = plt.subplot(n_models, 3, 8)
@@ -387,8 +387,8 @@ def create_scatter_comparison(predictions, targets, output_dir, max_points=5000,
     
     # Level populations (if available)
     ax = axes[3]
-    # tau=0, T=1, ne=2, rho=3, levels 从 4 开始
-    # tau 已移除，能级布居数从 rho 之后开始（idx_rho + 1 = 3）
+    # mass=0, T=1, ne=2, rho=3, levels 从 4 开始
+    # mass 已移除，能级布居数从 rho 之后开始（idx_rho + 1 = 3）
     y_true = targets[:, :, 3:].numpy().flatten()
     y_pred = predictions[:, :, 3:].numpy().flatten()
     

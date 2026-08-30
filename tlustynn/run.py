@@ -1,5 +1,22 @@
+"""Train your own TLUSTY-NN emulator on a custom dataset.
+
+Dataset format: one CSV file, one row per depth layer (50 layers per model):
+
+    teff, logg, log_he_h, M, T, ne, rho, level_1, ..., level_N
+
+    teff      effective temperature [K]
+    logg      surface gravity log10(cm/s^2)
+    log_he_h  helium abundance log(n_He/n_H) [dex]
+    M         mass depth [g/cm^2] (first data block of the TLUSTY .7 file)
+    T, ne, rho, level_i   target quantities (T/ne/rho/levels in any unit,
+                          log-transform is applied automatically, see config.py)
+
+Example:
+    python -m tlustynn.run --csv my_models.csv --epochs 1000
+    python -m tlustynn.run --csv my_models.csv --resume checkpoints/best_model.pt
+"""
+
 import os
-import sys
 import json
 import argparse
 import warnings
@@ -8,7 +25,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import torch
 
-from tlustynn.config import DATA_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, CSV_PATH, VARIABLE_WEIGHTS
+from tlustynn.config import DATA_CONFIG, MODEL_CONFIG, TRAIN_CONFIG, VARIABLE_WEIGHTS
 from tlustynn.data_loader import load_and_preprocess_data, create_data_loaders
 from tlustynn.model import create_model
 from tlustynn.train import Trainer
@@ -38,30 +55,35 @@ def save_stats(stats, save_dir):
         json.dump(convert(stats), f, indent=2)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='TLUSTY NN Training')
-    parser.add_argument('--epochs', type=int, help='Number of training epochs')
-    parser.add_argument('--resume', type=str, help='Resume from checkpoint')
-    return parser.parse_args()
-
-
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser(description='TLUSTY-NN training on a custom dataset')
+    parser.add_argument('--csv', required=True, help='dataset CSV file (see header of this script)')
+    parser.add_argument('--epochs', type=int, default=None, help='training epochs')
+    parser.add_argument('--batch_size', type=int, default=None)
+    parser.add_argument('--learning_rate', type=float, default=None)
+    parser.add_argument('--save_dir', type=str, default=None, help='checkpoint output directory')
+    parser.add_argument('--resume', type=str, default=None, help='resume from checkpoint')
+    args = parser.parse_args()
 
     if args.epochs:
         TRAIN_CONFIG['epochs'] = args.epochs
+    if args.batch_size:
+        DATA_CONFIG['batch_size'] = args.batch_size
+    if args.learning_rate:
+        TRAIN_CONFIG['learning_rate'] = args.learning_rate
+    if args.save_dir:
+        TRAIN_CONFIG['save_dir'] = args.save_dir
 
-    print("="*70)
-    print("TLUSTY NN Training")
-    print("="*70)
-    print(f"  Data: {CSV_PATH}")
+    print("=" * 70)
+    print("TLUSTY-NN Training")
+    print("=" * 70)
+    print(f"  Data: {args.csv}")
     print(f"  Batch size: {DATA_CONFIG['batch_size']}")
     print(f"  Epochs: {TRAIN_CONFIG['epochs']}")
     print(f"  Learning rate: {TRAIN_CONFIG['learning_rate']}")
     print(f"  Hidden layers: {MODEL_CONFIG['hidden_layers']}")
-    print(f"  Activation: {MODEL_CONFIG['activation']}")
     print(f"  Device: {TRAIN_CONFIG['device']}")
-    print("="*70)
+    print("=" * 70)
 
     set_seed(DATA_CONFIG['random_seed'])
 
@@ -74,7 +96,8 @@ def main():
     os.makedirs(TRAIN_CONFIG['save_dir'], exist_ok=True)
 
     log_transform_cols = DATA_CONFIG.get('log_transform_cols')
-    df, input_cols, output_cols, stats = load_and_preprocess_data(CSV_PATH, log_transform_cols=log_transform_cols)
+    df, input_cols, output_cols, stats = load_and_preprocess_data(
+        args.csv, log_transform_cols=log_transform_cols)
     stats['input_cols'] = input_cols
     stats['output_cols'] = output_cols
     save_stats(stats, TRAIN_CONFIG['save_dir'])
@@ -86,8 +109,7 @@ def main():
         val_ratio=DATA_CONFIG['val_ratio'],
         random_seed=DATA_CONFIG['random_seed'],
         num_workers=DATA_CONFIG.get('num_workers', 4),
-        log_transform_cols=log_transform_cols
-    )
+        log_transform_cols=log_transform_cols)
     print(f"  {len(train_loader)} train batches, {len(val_loader)} val batches")
 
     model = create_model(MODEL_CONFIG['model_type'], **{

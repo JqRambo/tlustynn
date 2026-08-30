@@ -4,9 +4,9 @@ High-level API for TLUSTY NN atmosphere prediction.
 Usage:
     from tlustynn import predict_atmosphere
 
-    df = predict_atmosphere(teff=10000, logg=3.7, mh=0.0)
+    df = predict_atmosphere(teff=10000, logg=3.7, log_he_h=0.0)
     # Returns a pandas DataFrame with columns:
-    # teff, logg, mh, tau, T, ne, rho, level_1 ... level_55
+    # teff, logg, log_he_h, M, T, ne, rho, level_1 ... level_55
 """
 
 import os
@@ -29,9 +29,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from astropy.io import fits
 
 
-
-
-# Singleton predictor instance (lazy initialization)
 _predictor = None
 
 
@@ -53,23 +50,45 @@ def write_tlusty_model7(filename, model_data):
         # Write header: number of depths and parameters
         f.write(f"   {n_depth:3d}   {n_params:3d}\n")
         
-        # Write tau values (first parameter column)
-        tau_values = df['tau'].values
+        # Write mass values (first parameter column)
+        mass_values = df['M'].values
         for i in range(0, n_depth, 6):
-            line_values = tau_values[i:i+6]
-            line_str = "".join(f"{val:13.6E}" for val in line_values)
+            line_values = mass_values[i:i+6]
+            line_str = "".join(f"{val:13.6e}" for val in line_values)
             f.write(line_str + "\n")
         
         # Write all other parameters for each depth
         for depth_idx in range(n_depth):
-            # Skip tau column (col 0), keep T, ne, rho, level_1 ... level_55
+            # Skip mass column (col 0), keep T, ne, rho, level_1 ... level_55
             row_data = df.iloc[depth_idx, 1:].values
             
             for i in range(0, n_params, 5):
                 line_values = row_data[i:i+5]
-                line_str = "".join(f" {val:13.6E}" for val in line_values)
+                line_str = "".join(f" {val:13.6e}" for val in line_values)
                 f.write(line_str + "\n")
 
+
+def format_abundance(abn):
+    if isinstance(abn, (int, float)):
+        if abn == 0:
+            return "0"
+        else:
+            # 使用 .6e 格式，然后手动调整指数位数
+            formatted = f"{abn:.6e}"
+            # 检查指数部分
+            if 'e-' in formatted:
+                mantissa, exponent = formatted.split('e-')
+                exponent_int = int(exponent)
+                # 确保指数有两位数字
+                return f"{mantissa}e-{exponent_int:02d}"
+            elif 'e+' in formatted:
+                mantissa, exponent = formatted.split('e+')
+                exponent_int = int(exponent)
+                return f"{mantissa}e+{exponent_int:02d}"
+            else:
+                return formatted
+    else:
+        return str(abn)
 
 
 def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode, nfread, natoms, modes, ions):
@@ -90,14 +109,19 @@ def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode
             f.write("*\n")
             f.write(f" {natoms:2d}                   ! NATOMS\n")
             f.write("* mode abn modpf\n")
-       
+    
 
             for mode, abn, modpf in modes:
-                # 修复：根据abn的类型使用不同的格式化方式
-                if isinstance(abn, float):
-                    f.write(f"   {mode:>2d}  {abn:>6.2f}      {modpf:>2d}\n")
+
+                if isinstance(abn, (int, float)):
+                    if abn == 0:
+                        abn_str = "0.000000e+00"  
+                    else:
+                        abn_str = format_abundance(abn)
                 else:
-                    f.write(f"   {mode:>2d}  {abn:>2d}      {modpf:>2d}\n")
+                    abn_str = str(abn)
+
+                f.write(f"   {mode:>2d}  {abn_str:>12s}      {modpf:>2d}\n")
 
 
             f.write("*" + "-" * 64 + "\n")
@@ -166,11 +190,16 @@ def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode
             f.write("* mode abn modpf\n")
             
             for mode, abn, modpf in modes:
-                # 修复：根据abn的类型使用不同的格式化方式
-                if isinstance(abn, float):
-                    f.write(f"   {mode:>2d}  {abn:>6.2f}      {modpf:>2d}\n")
+
+                if isinstance(abn, (int, float)):
+                    if abn == 0:
+                        abn_str = "0.000000e+00"  
+                    else:
+                        abn_str = format_abundance(abn)
                 else:
-                    f.write(f"   {mode:>2d}  {abn:>2d}      {modpf:>2d}\n")
+                    abn_str = str(abn)
+
+                f.write(f"   {mode:>2d}  {abn_str:>12s}      {modpf:>2d}\n")
 
 
             f.write("*" + "-" * 64 + "\n")
@@ -186,11 +215,9 @@ def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode
                     filei_str = " " * 38 + f"'{filei}'" 
                     f.write(f"   0    0{filei_str}\n")
                 else:
-                    # 修复：根据值的类型使用不同的格式化方式
                     iat_str = "  " if iat == "" else f"{int(iat):3d}"
                     iz_str = "  " if iz == "" else f"{int(iz):2d}"
                     
-                    # 处理可能为空的字段
                     if nlevs == "":
                         nlevs_str = "     "
                     else:
@@ -224,141 +251,70 @@ def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode
             f.write("* end\n")
 
 
-
-def create_ff_model(output_dir, teff, logg, mh, lte_flag, ltgray_flag, nstmode, frequency, natoms_num):
+def create_ff_model(output_dir, teff, logg, log_he_h, lte_flag, ltgray_flag, nstmode, frequency, natoms_num):
     os.makedirs(output_dir, exist_ok=True)
     
-    if mh == 0:
-        mh_str = f"{mh:.1f}"
-        filename = f"{teff}_{logg}_{mh_str}.5"
-        output_path = os.path.join(output_dir, filename)
+    abn_he = 10**log_he_h
+    abn_he_str = format_abundance(abn_he)
 
-
-
-        modes = []
-        elements = [
-            (2, 0, 0),  # H
-            (2, 0, 0),
-            (0, 0, 0),
-            (0, 0, 0),
-            (0, 0, 0),
-            (1, 0, 0),
-            (1, 0, 0),
-            (1, 0, 0)
-            ]
+    filename = f"{teff}_{logg}_{log_he_h}.5"
+    output_path = os.path.join(output_dir, filename)
         
-        modes.extend(elements)
-        
-        ions = [
-            ( 1,   0,   9,   0,   0,   0, ' H 1', 'data/h1.dat'),
-            ( 1,   1,   1,   1,   0,   0, ' H 2', ' '),
-            ( 2,   0,  24,   0,   0,   0, 'He 1', 'data/he1.dat'),
-            ( 2,   1,  20,   0,   0,   0, 'He 2', 'data/he2.dat'),
-            ( 2,   2,   1,   1,   0,   0, 'He 3', ' '),
-            ( 0,   0,   0,  -1,   0,   0, '    ', ' ')
-            ]
-        
-        create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nstmode, frequency, natoms_num, modes, ions)
+    modes = []
+    elements = [
+        (2, 0, 0),  # H
+        (2, abn_he_str, 0),  # He abundance = 10**log_he_h
+        (0, 0, 0),
+        (0, 0, 0),
+        (0, 0, 0),
+        (1, 0, 0),
+        (1, 0, 0),
+        (1, 0, 0)
+        ]
+    
+    modes.extend(elements)
+    
+    ions = [
+        ( 1,   0,   9,   0,   0,   0, ' H 1', 'data/h1.dat'),
+        ( 1,   1,   1,   1,   0,   0, ' H 2', ' '),
+        ( 2,   0,  24,   0,   0,   0, 'He 1', 'data/he1.dat'),
+        ( 2,   1,  20,   0,   0,   0, 'He 2', 'data/he2.dat'),
+        ( 2,   2,   1,   1,   0,   0, 'He 3', ' '),
+        ( 0,   0,   0,  -1,   0,   0, '    ', ' ')
+        ]
+    
+    create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nstmode, frequency, natoms_num, modes, ions)
 
 
+def predict_atmosphere(teff, logg, log_he_h, output_dir=None, filename=None, output_format='csv'):
 
-    else:
-        mh_str = f"{mh:.1f}"
-        filename = f"{teff}_{logg}_{mh_str}.5"
-        output_path = os.path.join(output_dir, filename)
-            
-        modes = []
-        elements = [
-            (2, 0, 0),  # H
-            (2, mh, 0),
-            (0, 0, 0),
-            (0, 0, 0),
-            (0, 0, 0),
-            (1, 0, 0),
-            (1, 0, 0),
-            (1, 0, 0)
-            ]
-        
-        modes.extend(elements)
-        
-        ions = [
-            ( 1,   0,   9,   0,   0,   0, ' H 1', 'data/h1.dat'),
-            ( 1,   1,   1,   1,   0,   0, ' H 2', ' '),
-            ( 2,   0,  24,   0,   0,   0, 'He 1', 'data/he1.dat'),
-            ( 2,   1,  20,   0,   0,   0, 'He 2', 'data/he2.dat'),
-            ( 2,   2,   1,   1,   0,   0, 'He 3', ' '),
-            ( 0,   0,   0,  -1,   0,   0, '    ', ' ')
-            ]
-        
-        create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nstmode, frequency, natoms_num, modes, ions)
-
-
-def predict_atmosphere(teff, logg, mh, output_dir=None, filename=None, output_format='csv'):
-    """Predict a single stellar atmosphere model and optionally save to file.
-
-    The output follows the same column order as ``hhe.csv``:
-    ``teff, logg, mh, tau, T, ne, rho, level_1, ..., level_55``.
-    Each model contains 50 depth rows.
-
-    Parameters
-    ----------
-    teff : float
-        Effective temperature [K].
-    logg : float
-        Surface gravity (log10 of cm s^-2).
-    mh : float
-        Metallicity [dex].
-    output_dir : str, optional
-        Directory where the output file will be written. If ``None``, the DataFrame
-        is returned but no file is written.
-    filename : str, optional
-        Explicit file name. If ``None``, the file is named ``{teff}_{logg}_{mh}.{ext}``.
-    output_format : str, optional
-        Output format: 'csv' or '7' (TLUSTY format). Default is 'csv'.
-
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame with 50 rows (one per atmospheric depth) and columns
-        matching the original ``hhe.csv`` format.
-    str or None
-        Absolute path to the saved file if ``output_dir`` is given,
-        otherwise ``None``.
-    """
     predictor = _get_predictor()
-    result = predictor.predict(teff, logg, mh)
+    result = predictor.predict(teff, logg, log_he_h)
     y_pred = result['prediction'][0]  # [50, n_outputs]
 
-    # Retrieve output column names from training stats
     if predictor.stats and 'output_cols' in predictor.stats:
         output_cols = predictor.stats['output_cols']
     else:
         output_cols = [f'col_{i}' for i in range(y_pred.shape[1])]
 
-    # Build DataFrame from prediction
     df = pd.DataFrame(y_pred, columns=output_cols)
 
-    # Insert tau (physical units) – taken from the average tau profile.
-    # avg_tau_physical is stored in log10 space when log-transform is applied.
-    if predictor.avg_tau_physical is not None:
-        if predictor.stats and 'tau' in predictor.stats.get('log_transform_cols', []):
-            tau_vals = 10 ** predictor.avg_tau_physical
+    if predictor.avg_mass_physical is not None:
+        if predictor.stats and 'M' in predictor.stats.get('log_transform_cols', []):
+            mass_vals = 10 ** predictor.avg_mass_physical
         else:
-            tau_vals = predictor.avg_tau_physical
+            mass_vals = predictor.avg_mass_physical
     else:
-        tau_vals = np.zeros(50, dtype=np.float32)
-    df.insert(0, 'tau', tau_vals)
+        mass_vals = np.zeros(50, dtype=np.float32)
+    df.insert(0, 'M', mass_vals)
 
-
-    # Save to file if requested
     filepath = None
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
         
-        # Determine filename extension
         ext = output_format.lower()
         if filename is None:
-            filename = f"{teff}_{logg}_{mh}.{ext}"
+            filename = f"{teff}_{logg}_{log_he_h}.{ext}"
         elif not filename.endswith(f'.{ext}'):
             filename = f"{filename}.{ext}"
         
@@ -367,9 +323,8 @@ def predict_atmosphere(teff, logg, mh, output_dir=None, filename=None, output_fo
         # Write in requested format
         if output_format.lower() == 'csv':
 
-
             # Insert stellar parameters (replicated for every depth row)
-            df.insert(0, 'mh', float(mh))
+            df.insert(0, 'log_he_h', float(log_he_h))
             df.insert(0, 'logg', float(logg))
             df.insert(0, 'teff', float(teff))
 
@@ -377,7 +332,7 @@ def predict_atmosphere(teff, logg, mh, output_dir=None, filename=None, output_fo
             df.to_csv(filepath, index=False)
         elif output_format.lower() == '7':
             # Prepare model data dictionary for .7 format
-            # n_params is number of columns excluding teff, logg, mh, tau
+            # n_params is number of columns excluding teff, logg, log_he_h, mass
             model_data = {
                 'dataframe': df,
                 'n_depth': len(df),
@@ -405,10 +360,10 @@ class TlustyAtmosphere:
             checkpoint_path=checkpoint_path, device=device
         )
 
-    def predict(self, teff, logg, mh, output_dir=None, filename=None, 
+    def predict(self, teff, logg, log_he_h, output_dir=None, filename=None, 
                 output_format='csv'):
         """Same interface as :func:`predict_atmosphere`."""
-        result = self.predictor.predict(teff, logg, mh)
+        result = self.predictor.predict(teff, logg, log_he_h)
         y_pred = result['prediction'][0]
 
         if self.predictor.stats and 'output_cols' in self.predictor.stats:
@@ -418,14 +373,14 @@ class TlustyAtmosphere:
 
         df = pd.DataFrame(y_pred, columns=output_cols)
 
-        if self.predictor.avg_tau_physical is not None:
-            if self.predictor.stats and 'tau' in self.predictor.stats.get('log_transform_cols', []):
-                tau_vals = 10 ** self.predictor.avg_tau_physical
+        if self.predictor.avg_mass_physical is not None:
+            if self.predictor.stats and 'M' in self.predictor.stats.get('log_transform_cols', []):
+                mass_vals = 10 ** self.predictor.avg_mass_physical
             else:
-                tau_vals = self.predictor.avg_tau_physical
+                mass_vals = self.predictor.avg_mass_physical
         else:
-            tau_vals = np.zeros(50, dtype=np.float32)
-        df.insert(0, 'tau', tau_vals)
+            mass_vals = np.zeros(50, dtype=np.float32)
+        df.insert(0, 'M', mass_vals)
 
 
         filepath = None
@@ -435,7 +390,7 @@ class TlustyAtmosphere:
             # Determine filename extension
             ext = output_format.lower()
             if filename is None:
-                filename = f"{teff}_{logg}_{mh}.{ext}"
+                filename = f"{teff}_{logg}_{log_he_h}.{ext}"
 
 
             elif not filename.endswith(f'.{ext}'):
@@ -446,7 +401,7 @@ class TlustyAtmosphere:
             # Write in requested format
             if output_format.lower() == 'csv':
 
-                df.insert(0, 'mh', float(mh))
+                df.insert(0, 'log_he_h', float(log_he_h))
                 df.insert(0, 'logg', float(logg))
                 df.insert(0, 'teff', float(teff))
 
@@ -466,7 +421,6 @@ class TlustyAtmosphere:
 
         return df, filepath
     
-
 
 def create_fort55_lin(output_dir, filename,
                      imode, idstd, iprin,
@@ -504,7 +458,6 @@ def create_fort55_lin(output_dir, filename,
         f.write(f"{nmlist:8d}{iunitm:8d}                                        ! nnlist\n")
 
 
-
 def run_synspec(synspec_dir, model_name,linelist_file):
 
     command = ["$TLUSTY/RSynspec", model_name, "fort.55.lin", linelist_file]
@@ -525,141 +478,73 @@ def run_synspec(synspec_dir, model_name,linelist_file):
         return False
 
 
+def synthesize_spectrum(teff, logg, log_he_h, spec_dir, down, up, res, format, plot=False):
 
+# synthesize_spectrum( 32200, 5.7, -1.635, '/home/ubuntu/phd/lyp/tlusty', 3000, 9000, 0.001, 'csv', plot=True)
 
-
-def synthesize_spectrum(teff, logg, mh, spec_dir, linelist, down, up, format, plot=False):
+    create_ff_model(spec_dir, teff, logg, log_he_h, lte_flag='F', ltgray_flag='F', nstmode='nst', frequency=2000, natoms_num=8)
     
-    create_ff_model(spec_dir, teff, logg, mh, lte_flag='F', ltgray_flag='F', nstmode='nst', frequency=2000, natoms_num=8)
+    predict_atmosphere(teff, logg, log_he_h, output_dir=spec_dir, output_format='7')
+
+    create_fort55_lin(spec_dir, "fort.55.lin",
+        imode=0, idstd=50, iprin=1,           
+        inmod=1, intrpl=0, ichang=0, ichemc=0,
+        iophli=0, nunalp=0, nunbet=0, nungam=0, nunbal=0,          
+        ifreq=1, inlte=1, icontl=0, inlist=0, ifhe2=0,         
+        ihydpr=0, ihe1pr=0, ihe2pr=0,         
+        alam0=down, alast=up, cutof0=10, cutofs=0.0, relop=res, space=0.5,
+        nmlist=0, iunitm=0)
     
-    predict_atmosphere(teff, logg, mh, output_dir=spec_dir, output_format='7')
+    run_synspec(spec_dir, f"{teff}_{logg}_{log_he_h}", "data/gfATO.dat")
     
-    if linelist == "hhe":
-        create_fort55_lin(spec_dir, "fort.55.lin",
-            imode=0, idstd=34, iprin=1,           
-            inmod=1, intrpl=0, ichang=0, ichemc=0,
-            iophli=0, nunalp=0, nunbet=0, nungam=0, nunbal=0,          
-            ifreq=1, inlte=1, icontl=0, inlist=0, ifhe2=0,         
-            ihydpr=0, ihe1pr=0, ihe2pr=0,         
-            alam0=down, alast=up, cutof0=10, cutofs=0.0, relop=0.0001, space=0.01,
-            nmlist=0, iunitm=0)
-        
-        run_synspec(spec_dir, f"{teff}_{logg}_{mh}", "data/linelist.test")
-        
-        spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{mh}.spec")  
+    spec_file = os.path.join(spec_dir, ".spec")
+    if not os.path.exists(spec_file):
+        spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{log_he_h}.spec")
+    
+    if os.path.exists(spec_file):
+        spec = pd.read_csv(spec_file, sep='\s+', header=None, names=['waveobs', 'flux'])
 
-        if not os.path.exists(spec_file):
-            spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{mh}.spec")
-        
-        if os.path.exists(spec_file):
-            spec = pd.read_csv(spec_file, sep='\s+', header=None, names=['waveobs', 'flux'])
+        if plot:
 
-            if plot:
-                output_file=os.path.join(os.path.abspath(spec_dir), f'spec.pdf')
+            output_file=os.path.join(os.path.abspath(spec_dir), f'spec.pdf')
 
-                fig, ax =plt.subplots(figsize=(10, 5),dpi=300)
+            fig, ax =plt.subplots(figsize=(10, 5), dpi=300)
+            
+            ax.plot(spec['waveobs'], spec['flux'], color='r', linestyle='-', linewidth=0.6)
+            ax.set_xlabel('Wavelength (Å)', fontsize=12)
+            ax.set_ylabel('Flux', fontsize=12)
+            ax.legend(loc='upper right', fontsize=10)
+            ax.tick_params(axis='both', which='major', labelsize=8)
+            ax.set_xlim(3600, 7500)
+            ax.set_ylim(None, None)
 
-                ax.plot(spec['waveobs'], spec['flux'], color='r', linestyle='-', linewidth=0.6)
-                ax.set_xlabel('Wavelength (Å)', fontsize=12)
-                ax.set_ylabel('Flux', fontsize=12)
-                ax.tick_params(axis='both', which='major', labelsize=8)
-                ax.set_xlim(3600, 7500)
-                ax.set_ylim(None, None)
-
-                fig.savefig(output_file, dpi=600, bbox_inches='tight')
-                plt.close()
-            else:
-                pass
+            fig.savefig(output_file, dpi=600, bbox_inches='tight')
+            plt.close()
         else:
-            raise FileNotFoundError(f"Spectrum output file not found in {spec_dir}")
-        
+            pass
 
-        if format == "csv":
-            filename = f"{teff}_{logg}_{mh}.csv"
-            filepath = os.path.join(os.path.abspath(spec_dir), filename)
-            spec.to_csv(filepath, index=False)
-        else: 
-            
-            filename = f"{teff}_{logg}_{mh}.fits"
-            filepath = os.path.join(os.path.abspath(spec_dir), filename)
-            
-            col1 = fits.Column(name='waveobs', format='E', array=spec['waveobs'].values)
-            col2 = fits.Column(name='flux', format='E', array=spec['flux'].values)
-            
-            hdu = fits.BinTableHDU.from_columns([col1, col2])
-            
-            hdu.header['TEFF'] = (teff, 'Effective Temperature (K)')
-            hdu.header['LOGG'] = (logg, 'Surface Gravity (log10 cm/s^2)')
-            hdu.header['MH'] = (mh, 'Metallicity (dex)')
-            hdu.header['LINELIST'] = (linelist, 'Line list used')
-            hdu.header['WAVEMIN'] = (down, 'Minimum wavelength (Angstrom)')
-            hdu.header['WAVEMAX'] = (up, 'Maximum wavelength (Angstrom)')
-            hdu.writeto(filepath, overwrite=True)
-            
-
-
-    elif linelist == 'multi':
-        create_fort55_lin(spec_dir, "fort.55.lin",
-            imode=0, idstd=50, iprin=1,           
-            inmod=1, intrpl=0, ichang=0, ichemc=0,
-            iophli=0, nunalp=0, nunbet=0, nungam=0, nunbal=0,          
-            ifreq=1, inlte=1, icontl=0, inlist=0, ifhe2=0,         
-            ihydpr=0, ihe1pr=0, ihe2pr=0,         
-            alam0=down, alast=up, cutof0=10, cutofs=0.0, relop=0.0001, space=0.5,
-            nmlist=0, iunitm=0)
-        
-        run_synspec(spec_dir, f"{teff}_{logg}_{mh}", "data/gfATO.dat")
-        
-        spec_file = os.path.join(spec_dir, ".spec")
-        if not os.path.exists(spec_file):
-            spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{mh}.spec")
-        
-        if os.path.exists(spec_file):
-            spec = pd.read_csv(spec_file, sep='\s+', header=None, names=['waveobs', 'flux'])
-
-            if plot:
-
-                output_file=os.path.join(os.path.abspath(spec_dir), f'spec.pdf')
-
-                fig, ax =plt.subplots(figsize=(10, 5), dpi=300)
-                
-                ax.plot(spec['waveobs'], spec['flux'], color='r', linestyle='-', linewidth=0.6)
-                ax.set_xlabel('Wavelength (Å)', fontsize=12)
-                ax.set_ylabel('Flux', fontsize=12)
-                ax.legend(loc='upper right', fontsize=10)
-                ax.tick_params(axis='both', which='major', labelsize=8)
-                ax.set_xlim(3600, 7500)
-                ax.set_ylim(None, None)
-
-                fig.savefig(output_file, dpi=600, bbox_inches='tight')
-                plt.close()
-            else:
-                pass
-
-        else:
-            raise FileNotFoundError(f"Spectrum output file not found in {spec_dir}")
-        
-        if format == "csv":
-            filename = f"{teff}_{logg}_{mh}.csv"
-            filepath = os.path.join(os.path.abspath(spec_dir), filename)
-            spec.to_csv(filepath, index=False)
-
-        else:  
-            filename = f"{teff}_{logg}_{mh}.fits"
-            filepath = os.path.join(os.path.abspath(spec_dir), filename)
-            
-            col1 = fits.Column(name='waveobs', format='E', array=spec['waveobs'].values)
-            col2 = fits.Column(name='flux', format='E', array=spec['flux'].values)
-            
-            hdu = fits.BinTableHDU.from_columns([col1, col2])
-            
-            hdu.header['TEFF'] = (teff, 'Effective Temperature (K)')
-            hdu.header['LOGG'] = (logg, 'Surface Gravity (log10 cm/s^2)')
-            hdu.header['MH'] = (mh, 'Metallicity (dex)')
-            hdu.header['LINELIST'] = (linelist, 'Line list used')
-            hdu.header['WAVEMIN'] = (down, 'Minimum wavelength (Angstrom)')
-            hdu.header['WAVEMAX'] = (up, 'Maximum wavelength (Angstrom)')
-            
-            hdu.writeto(filepath, overwrite=True)
+    else:
+        raise FileNotFoundError(f"Spectrum output file not found in {spec_dir}")
     
-    return filepath  
+    if format == "csv":
+        filename = f"{teff}_{logg}_{log_he_h}.csv"
+        filepath = os.path.join(os.path.abspath(spec_dir), filename)
+        spec.to_csv(filepath, index=False)
+
+    else:  
+        filename = f"{teff}_{logg}_{log_he_h}.fits"
+        filepath = os.path.join(os.path.abspath(spec_dir), filename)
+        
+        col1 = fits.Column(name='waveobs', format='E', array=spec['waveobs'].values)
+        col2 = fits.Column(name='flux', format='E', array=spec['flux'].values)
+        
+        hdu = fits.BinTableHDU.from_columns([col1, col2])
+        
+        hdu.header['TEFF'] = (teff, 'Effective Temperature (K)')
+        hdu.header['LOGG'] = (logg, 'Surface Gravity (log10 cm/s^2)')
+        hdu.header['LOGHEH'] = (log_he_h, 'log(n_He/n_H) (dex)')
+        hdu.header['WAVEMIN'] = (down, 'Minimum wavelength (Angstrom)')
+        hdu.header['WAVEMAX'] = (up, 'Maximum wavelength (Angstrom)')
+        
+        hdu.writeto(filepath, overwrite=True)
+

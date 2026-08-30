@@ -25,11 +25,12 @@ dependencies = [
     "scikit-learn",
     "matplotlib",
     "tqdm",
+        "astropy",
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/tlusty-nn"
-Repository = "https://github.com/YOUR_USERNAME/tlusty-nn"
+Homepage = "https://github.com/JqRambo/tlustynn"
+Repository = "https://github.com/JqRambo/tlustynn"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -8,7 +8,7 @@ import os
 
 warnings.filterwarnings('ignore')
 
-from .config import AVG_TAU_SAVE_PATH
+from .config import AVG_MASS_SAVE_PATH
 
 
 PHYSICAL_LIMITS = {
@@ -35,8 +35,8 @@ class TlustyDataset(Dataset):
         self.input_stats = input_stats
         self.output_stats = output_stats
         self.log_transform_cols = log_transform_cols or []
-        # 恒星参数列（不含 tau，tau 作为模型输入）
-        self.stellar_input_cols = [c for c in input_cols if c != 'tau']
+        # 恒星参数列（不含 mass，mass 作为模型输入）
+        self.stellar_input_cols = [c for c in input_cols if c != 'M']
         
         # 预先把 DataFrame 转成 numpy 数组，避免 __getitem__ 反复做 pandas 过滤
         df = df.reset_index(drop=True)
@@ -44,10 +44,10 @@ class TlustyDataset(Dataset):
         self.model_ids = df['model_id'].unique()
         self._verify_structure(df, self.model_ids)
         
-        sort_col = 'tau' if 'tau' in df.columns else self.stellar_input_cols[0]
-        # all_cols 必须包含 tau（用于深度排序和作为模型输入），即使 output_cols 不含 tau
-        tau_col = 'tau'
-        all_cols = self.stellar_input_cols + [tau_col] + self.output_cols
+        sort_col = 'M' if 'M' in df.columns else self.stellar_input_cols[0]
+        # all_cols 必须包含 mass（用于深度排序和作为模型输入），即使 output_cols 不含 mass
+        mass_col = 'M'
+        all_cols = self.stellar_input_cols + [mass_col] + self.output_cols
         
         # 按 model_id 和深度排序，reshape 为 [n_models, 50, n_cols]
         df_sorted = df.sort_values(['model_id', sort_col])
@@ -57,9 +57,9 @@ class TlustyDataset(Dataset):
         
         # x: 恒星参数（每层相同，取第 0 层）
         self._x = data[:, 0, :len(self.stellar_input_cols)]
-        # tau: 光深（作为模型输入）
-        self._tau = data[:, :, len(self.stellar_input_cols)]
-        # y: 输出变量（不含 tau）
+        # mass: 光深（作为模型输入）
+        self._mass = data[:, :, len(self.stellar_input_cols)]
+        # y: 输出变量（不含 mass）
         self._y = data[:, :, len(self.stellar_input_cols)+1:]
         # depth 编码：固定 1-50 归一化到 [-1, 1]
         self._depths = (2.0 * (np.arange(50, dtype=np.float32) - 1) / 49.0 - 1.0)
@@ -105,7 +105,7 @@ class TlustyDataset(Dataset):
     def __getitem__(self, idx):
         """获取单个模型样本（向量化版本，直接从预计算 numpy 数组索引）"""
         x = self._x[idx]
-        tau = self._tau[idx]
+        mass = self._mass[idx]
         y = self._y[idx]
         depths = self._depths.copy()
         
@@ -121,12 +121,12 @@ class TlustyDataset(Dataset):
             if y.shape[0] < 50:
                 pad = np.zeros((50 - y.shape[0], y.shape[1]), dtype=np.float32)
                 y = np.vstack([y, pad])
-                tau_pad = np.zeros(50 - len(tau), dtype=np.float32)
-                tau = np.concatenate([tau, tau_pad])
+                mass_pad = np.zeros(50 - len(mass), dtype=np.float32)
+                mass = np.concatenate([mass, mass_pad])
                 depths = np.concatenate([depths, np.zeros(50 - len(depths), dtype=np.float32)])
             else:
                 y = y[:50]
-                tau = tau[:50]
+                mass = mass[:50]
                 depths = depths[:50]
         
         # 如果需要，进行归一化（通常在 load_and_preprocess_data 中已完成）
@@ -134,13 +134,13 @@ class TlustyDataset(Dataset):
             x = self._normalize_input(x)
         if self.normalize and self.output_stats is not None:
             y = self._normalize_output(y)
-            # tau 若在 output_stats 中也进行归一化
-            if 'tau' in self.output_stats:
-                tau = self._normalize_tau(tau)
+            # mass 若在 output_stats 中也进行归一化
+            if 'M' in self.output_stats:
+                mass = self._normalize_mass(mass)
         
         result = {
             'x': torch.tensor(x, dtype=torch.float32),
-            'tau': torch.tensor(tau, dtype=torch.float32),
+            'M': torch.tensor(mass, dtype=torch.float32),
             'depth': torch.tensor(depths, dtype=torch.float32),
             'y': torch.tensor(y, dtype=torch.float32),
             'model_id': self.model_ids[idx]
@@ -168,18 +168,18 @@ def clip_to_physical_range(df, col, physical_type=None):
     return df
 
 
-def round_to_dataset_grid(teff, logg, mh):
+def round_to_dataset_grid(teff, logg, log_he_h):
     """将恒星参数四舍五入到数据集的网格上"""
     teff_r = np.round(teff / 500.0) * 500.0
     logg_r = np.round(logg / 0.1) * 0.1
-    mh_r = np.round(mh / 0.5) * 0.5
-    return teff_r, logg_r, mh_r
+    log_he_h_r = np.round(log_he_h / 0.5) * 0.5
+    return teff_r, logg_r, log_he_h_r
 
 
 def normalize_input_physical(x, stats, input_cols=None):
     """将物理单位的输入归一化到 [-1, 1]"""
     if input_cols is None:
-        input_cols = stats.get('input_cols', ['teff', 'logg', 'mh'])
+        input_cols = stats.get('input_cols', ['teff', 'logg', 'log_he_h'])
     if isinstance(x, np.ndarray):
         x = torch.tensor(x, dtype=torch.float32)
     x_norm = x.clone()
@@ -201,7 +201,7 @@ def normalize_input_physical(x, stats, input_cols=None):
 def denormalize_input_physical(x_norm, stats, input_cols=None):
     """将 [-1, 1] 的输入反归一化到物理单位"""
     if input_cols is None:
-        input_cols = stats.get('input_cols', ['teff', 'logg', 'mh'])
+        input_cols = stats.get('input_cols', ['teff', 'logg', 'log_he_h'])
     if isinstance(x_norm, np.ndarray):
         x_norm = torch.tensor(x_norm, dtype=torch.float32)
     x_denorm = x_norm.detach().clone()
@@ -221,19 +221,19 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
     df = pd.read_csv(csv_path)
     
     # 输入列：3 个恒星参数
-    input_cols = ['teff', 'logg', 'mh']
+    input_cols = ['teff', 'logg', 'log_he_h']
     
-    # 输出列：tau + T + ne + rho + 55 个能级布居数
+    # 输出列：mass + T + ne + rho + 55 个能级布居数
     depth_related_cols = ['depth_index', 'depth_index.1', 'DEPTH_INDEX', 'depth']
     exclude_cols = input_cols + depth_related_cols + ['model_id']
     output_cols = [col for col in df.columns if col not in exclude_cols]
-    # 确保 tau 在输出列中且排在前面（与原 CSV 顺序一致）
-    if 'tau' in output_cols:
-        output_cols.remove('tau')
-        output_cols = ['tau'] + output_cols
+    # 确保 mass 在输出列中且排在前面（与原 CSV 顺序一致）
+    if 'M' in output_cols:
+        output_cols.remove('M')
+        output_cols = ['M'] + output_cols
     
     # 生成模型 ID
-    df['model_id'] = df[['teff', 'logg', 'mh']].astype(str).agg('_'.join, axis=1)
+    df['model_id'] = df[['teff', 'logg', 'log_he_h']].astype(str).agg('_'.join, axis=1)
     
     # 检查异常值
     issue_counts = {}
@@ -303,15 +303,15 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
         if n_clipped > 0:
             df[col] = df[col].clip(lower=lower, upper=upper)
     
-    # 计算平均 tau 剖面（物理单位），在归一化之前保存
-    df_sorted_for_tau = df.sort_values(['model_id', 'tau'])
-    tau_data = df_sorted_for_tau.groupby('model_id')['tau'].apply(lambda x: x.values)
-    avg_tau_physical = np.mean(np.stack(tau_data.values), axis=0)
+    # 计算平均 mass 剖面（物理单位），在归一化之前保存
+    df_sorted_for_mass = df.sort_values(['model_id', 'M'])
+    mass_data = df_sorted_for_mass.groupby('model_id')['M'].apply(lambda x: x.values)
+    avg_mass_physical = np.mean(np.stack(mass_data.values), axis=0)
     
-    avg_tau_dir = os.path.dirname(AVG_TAU_SAVE_PATH)
-    os.makedirs(avg_tau_dir, exist_ok=True)
-    np.save(AVG_TAU_SAVE_PATH, avg_tau_physical.astype(np.float32))
-    print(f"  Saved average physical tau profile to {AVG_TAU_SAVE_PATH}")
+    avg_mass_dir = os.path.dirname(AVG_MASS_SAVE_PATH)
+    os.makedirs(avg_mass_dir, exist_ok=True)
+    np.save(AVG_MASS_SAVE_PATH, avg_mass_physical.astype(np.float32))
+    print(f"  Saved average physical mass profile to {AVG_MASS_SAVE_PATH}")
     
     # Min-Max 归一化到 [-1, 1]
     normalization = 'minmax'
@@ -338,14 +338,14 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
             df[col] = 2.0 * (df[col] - ymin) / (ymax - ymin) - 1.0
             df[col] = df[col].clip(-1, 1)
     
-    # 从模型输出中移除 tau，tau 将作为输入
+    # 从模型输出中移除 mass，mass 将作为输入
     output_cols_full = output_cols.copy()
-    model_output_cols = [c for c in output_cols if c != 'tau']
+    model_output_cols = [c for c in output_cols if c != 'M']
     
-    # 计算平均 tau 剖面（归一化后），用于预测时默认输入
-    df_sorted_for_tau = df.sort_values(['model_id', 'tau'])
-    tau_data = df_sorted_for_tau.groupby('model_id')['tau'].apply(lambda x: x.values)
-    avg_tau_norm = np.mean(np.stack(tau_data.values), axis=0)
+    # 计算平均 mass 剖面（归一化后），用于预测时默认输入
+    df_sorted_for_mass = df.sort_values(['model_id', 'M'])
+    mass_data = df_sorted_for_mass.groupby('model_id')['M'].apply(lambda x: x.values)
+    avg_mass_norm = np.mean(np.stack(mass_data.values), axis=0)
     
     stats = {
         'input': input_stats,
@@ -354,10 +354,10 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
         'input_cols': input_cols,
         'output_cols': model_output_cols,
         'output_cols_full': output_cols_full,
-        'tau_stats': output_stats.get('tau', {}),
-        'tau_log_transformed': 'tau' in log_transform_cols,
-        'avg_tau_norm': avg_tau_norm.astype(np.float32).tolist(),
-        'depth_col': None,  # tau 作为输入，深度编码使用固定层索引或 tau
+        'mass_stats': output_stats.get('M', {}),
+        'mass_log_transformed': 'M' in log_transform_cols,
+        'avg_mass_norm': avg_mass_norm.astype(np.float32).tolist(),
+        'depth_col': None,  # mass 作为输入，深度编码使用固定层索引或 mass
         'normalization': normalization,
         'norm_range': 'minus1_to_1'
     }

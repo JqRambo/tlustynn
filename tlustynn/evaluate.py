@@ -44,10 +44,10 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
         x = batch['x'].to(predictor.device)
         y_true = batch['y'].to(predictor.device)
         
-        if 'tau' in batch:
-            tau = batch['tau'].to(predictor.device)
+        if 'M' in batch:
+            mass = batch['M'].to(predictor.device)
         else:
-            tau = None
+            mass = None
         
         if 'depth' in batch:
             depth = batch['depth'].to(predictor.device)
@@ -55,7 +55,7 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
             depth = None
         
         with torch.no_grad():
-            y_pred = predictor.model(x, tau=tau, depth=depth)
+            y_pred = predictor.model(x, mass=mass, depth=depth)
         
         all_predictions.append(y_pred.cpu())
         all_targets.append(y_true.cpu())
@@ -67,7 +67,7 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
     inputs = torch.cat(all_inputs, dim=0)
     
     output_cols = stats['output_cols']
-    input_cols = stats.get('input_cols', ['teff', 'logg', 'mh'])
+    input_cols = stats.get('input_cols', ['teff', 'logg', 'log_he_h'])
     predictions_denorm = inverse_transform_output(predictions, stats, output_cols)
     targets_denorm = inverse_transform_output(targets, stats, output_cols)
 
@@ -192,8 +192,8 @@ def _round_to_dataset_grid(inputs):
         return inputs
     
     for i in range(len(arr)):
-        teff, logg, mh = arr[i, 0], arr[i, 1], arr[i, 2]
-        arr[i, 0], arr[i, 1], arr[i, 2] = round_to_dataset_grid(teff, logg, mh)
+        teff, logg, log_he_h = arr[i, 0], arr[i, 1], arr[i, 2]
+        arr[i, 0], arr[i, 1], arr[i, 2] = round_to_dataset_grid(teff, logg, log_he_h)
     
     return arr
 
@@ -221,15 +221,15 @@ def plot_results(predictions, targets, inputs, stats, output_dir, n_samples=5):
         inputs_np = np.array(inputs)
 
     if inputs_np[:, 0].max() <= 1.5 and inputs_np[:, 0].min() >= -1.5:
-        inputs_np = denormalize_input_physical(inputs_np, stats, input_cols=['teff', 'logg', 'mh']).numpy()
+        inputs_np = denormalize_input_physical(inputs_np, stats, input_cols=['teff', 'logg', 'log_he_h']).numpy()
 
     inputs_display = _round_to_dataset_grid(inputs_np)
     
     for i in range(min(3, len(inputs_display))):
         teff_val = float(inputs_display[i, 0])
         logg_val = float(inputs_display[i, 1])
-        mh_val = float(inputs_display[i, 2])
-        print(f"  Plot model {i+1}: Teff={teff_val:.0f}K, logg={logg_val:.2f}, mh={mh_val:+.2f}")
+        log_he_h_val = float(inputs_display[i, 2])
+        print(f"  Plot model {i+1}: Teff={teff_val:.0f}K, logg={logg_val:.2f}, log_he_h={log_he_h_val:+.2f}")
     
     for i, idx in enumerate(sample_indices):
         create_single_model_plot(predictions, targets, inputs_display, idx, output_dir, stats=stats)

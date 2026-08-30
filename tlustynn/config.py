@@ -6,18 +6,18 @@ CHECKPOINT_DIR = os.path.join(PACKAGE_ROOT, 'checkpoints')
 
 CSV_PATH = './hhe.csv'
 
-INPUT_COLS = ['teff', 'logg', 'mh']
+INPUT_COLS = ['teff', 'logg', 'log_he_h']
 
 INPUT_RANGES = {
     'teff': {'min': 10000.0, 'max': 100000.0},
     'logg': {'min': 1.5, 'max': 8.0},
-    'mh': {'min': -4.0, 'max': 0.0},
+    'log_he_h': {'min': -4.0, 'max': 0.0},
 }
 
 INPUT_STEPS = {
     'teff': 500.0,
     'logg': 0.1,
-    'mh': 0.5,
+    'log_he_h': 0.5,
 }
 
 DATA_CONFIG = {
@@ -77,7 +77,7 @@ VARIABLE_WEIGHTS = {
 }
 
 
-AVG_TAU_SAVE_PATH = os.path.join(CHECKPOINT_DIR, 'avg_tau_physical.npy')
+AVG_MASS_SAVE_PATH = os.path.join(CHECKPOINT_DIR, 'avg_mass_physical.npy')
 
 INFERENCE_CONFIG = {
     'checkpoint': 'best_model.pt',

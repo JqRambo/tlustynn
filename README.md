@@ -18,7 +18,7 @@ Given three stellar parameters — effective temperature (Teff), surface gravity
 
 ```bash
 git clone https://github.com/JqRambo/tlustynn.git
-cd tlusty-nn
+cd tlustynn
 ```
 
 ### Install TLUSTY (optional)
@@ -54,9 +54,9 @@ Please note that this code has not been peer-reviewed.
 
 > If you intend to use it, please contact the author, Dr. Jiao Li (lijiao@nao.cas.cn).  
 
-> The pretrained model weight (`best_model.pt`, ~1 GB) exceeds GitHub's normal file-size limit (100 MB).
-  Please reach out to Dr. Qi Jia(jq.physics@hotmail.com) to request access.
-
+> The pretrained model weight (`best_model.pt`, ~1 GB) exceeds GitHub's file-size limit and is therefore **not included** in this repository.
+  Please reach out to Dr. Qi Jia (jq.physics@hotmail.com) to request access, and place the file in `tlustynn/checkpoints/`.
+  Alternatively, you can train your own model with `run.py` (see below).
 
 ## Install into your Python environment
 
@@ -73,16 +73,18 @@ import tlustynn
 
 ## Quick Start
 
-## Predict a single atmosphere model
+A ready-to-use example script is provided in **`basic.py`**.
+
+### Predict a single atmosphere model
 
 ```python
 from tlustynn import predict_atmosphere
 
 # Predict and save as CSV
 df, csv_path = predict_atmosphere(
-    teff=10000,   # Effective temperature [K]
-    logg=3.7,     # Surface gravity [log10(cm/s^2)]
-    mh=0.0,       # Metallicity [dex]
+    teff=10000,      # Effective temperature [K]
+    logg=3.7,        # Surface gravity [log10(cm/s^2)]
+    log_he_h=0.0,    # Helium abundance log(n_He/n_H) [dex]
     output_dir="./predictions",
     output_format='csv'   # Save as CSV file
 )
@@ -91,7 +93,7 @@ print(f"CSV saved to: {csv_path}")   # → .../predictions/10000_3.7_0.0.csv
 print(f"DataFrame shape: {df.shape}")  # (50, 58) → 50 depths × 58 parameters
 ```
 
-The default file names follow the format **`{teff}_{logg}_{mh}.csv`** and **`{teff}_{logg}_{mh}.7`**.
+The default file names follow the format **`{teff}_{logg}_{log_he_h}.csv`** and **`{teff}_{logg}_{log_he_h}.7`**.
 
 ### Predict and save as TLUSTY .7 format (fort.7)
 
@@ -99,7 +101,7 @@ The default file names follow the format **`{teff}_{logg}_{mh}.csv`** and **`{te
 df, seven_path = predict_atmosphere(
     teff=10000,
     logg=3.7,
-    mh=0.0,
+    log_he_h=0.0,
     output_dir="./predictions",
     output_format='7'     # Save as .7 file
 )
@@ -117,7 +119,7 @@ create_ff_model(
     output_dir='/path/to/workdir',
     teff=10000,
     logg=3.7,
-    mh=0.0,
+    log_he_h=0.0,
     lte_flag='F',
     ltgray_flag='F',
     nstmode='nst',
@@ -135,32 +137,21 @@ After predicting the atmosphere model, you can directly call **SYNSPEC** through
 from tlustynn import synthesize_spectrum
 
 # Synthesize a H/He spectrum and save as CSV
-spec_path = synthesize_spectrum(
+synthesize_spectrum(
     teff=45000,        # Effective temperature [K]
     logg=4.0,          # Surface gravity
-    mh=0.0,            # Metallicity [dex]
+    log_he_h=0.0,      # Helium abundance log(n_He/n_H) [dex]
     spec_dir="./spec", # Working directory for TLUSTY/SYNSPEC I/O
-    linelist="hhe",    # Line list: "hhe" (H/He only) or "multi" (full atomic)
     down=3600,         # Lower wavelength bound [Å]
     up=7500,           # Upper wavelength bound [Å]
+    res=0.1,           # Wavelength step [Å]
     format="csv"       # Output format: "csv" or "fits"
 )
-
-print(f"Spectrum saved to: {spec_path}")
 ```
 
-Set `plot=True` to automatically generate a `spec.pdf` figure in the same directory:
-
-```python
-spec_path = synthesize_spectrum(
-    teff=45000, logg=4.0, mh=0.0,
-    spec_dir="./spec",
-    linelist="hhe",
-    down=3600, up=7500,
-    format="fits",
-    plot=True
-)
-```
+`synthesize_spectrum` has no return value; the spectrum is written to the working directory
+(`{teff}_{logg}_{log_he_h}.spec` raw output, plus `.csv`/`.fits` as requested).
+Set `plot=True` to additionally generate a `spec.pdf` figure in the same directory.
 
 **What happens under the hood**
 
@@ -183,8 +174,8 @@ The output CSV follows exactly the same column order as the original `hhe.csv` t
 |--------|-------------|
 | `teff` | Effective temperature [K] (replicated for all 50 rows) |
 | `logg` | Surface gravity (replicated) |
-| `log(n_He/n_H)`   | helium abundance [dex] (replicated) |
-| `tau`  | Optical depth (average profile in physical units) |
+| `log_he_h` | Helium abundance log(n_He/n_H) [dex] (replicated) |
+| `M`    | Mass depth [g/cm²] (average profile in physical units) |
 | `T`    | Temperature [K] |
 | `ne`   | Electron number density [cm⁻³] |
 | `rho`  | Mass density [g/cm³] |
@@ -204,44 +195,52 @@ The `.7` file is a plain-text model atmosphere in the standard TLUSTY `fort.7` f
 ```
 
 - **Line 1**: `n_depth` (50) and `n_params` (58)
-- **Next lines**: `tau` values, 6 per line
-- **Remaining lines**: for each depth, the 58 parameters (`T`, `ne`, `rho`, `level_1` … `level_55`), 6 per line
+- **Next lines**: mass-depth `M` values, 6 per line
+- **Remaining lines**: for each depth, the 58 parameters (`T`, `ne`, `rho`, `level_1` … `level_55`), 5 per line
 
 ---
 
 
 ## Training your own model
 
-If you have the full `hhe.csv` dataset (~2.5 GB), you can re-train or fine-tune the network:
+If you have your own grid of converged TLUSTY models, you can train your own emulator with the `tlustynn.run` module:
 
 ```bash
-# Put hhe.csv in the working directory (or edit tlustynn/config.py::CSV_PATH)
-python scripts/train.py --epochs 1500
+python -m tlustynn.run --csv my_models.csv --epochs 1000
+# Resume from a checkpoint:
+python -m tlustynn.run --csv my_models.csv --resume checkpoints/best_model.pt
 ```
 
-Trained checkpoints will be saved to `./checkpoints/` by default.
+The dataset CSV must contain one row per depth layer (50 layers per model) with the columns:
+
+```
+teff, logg, log_he_h, M, T, ne, rho, level_1, ..., level_N
+```
+
+i.e. the three stellar parameters, the mass depth `M` (first data block of the TLUSTY `.7` file), and the target quantities. See the header of `tlustynn/run.py` for details.
+
+Trained checkpoints (`best_model.pt`, `stats.json`, `avg_mass_physical.npy`, ...) will be saved to `./checkpoints/` by default (override with `--save_dir`).
 
 ---
 
 ## Repository structure
 
 ```
-tlusty-nn/
+tlustynn/
 ├── tlustynn/                 # Main Python package
 │   ├── __init__.py
 │   ├── api.py                # User-facing predict_atmosphere() & synthesize_spectrum() API
 │   ├── model.py              # TLUSTYNN network definition
 │   ├── predict.py            # TlustyPredictor (model loading & inference)
 │   ├── data_loader.py        # Dataset & preprocessing
-│   ├── physics.py            # Physics-informed loss constraints
 │   ├── train.py              # Trainer class
+│   ├── run.py                # Training entry point for custom datasets
+│   ├── evaluate.py           # Evaluation & plotting entry point
 │   ├── utils.py              # Plotting utilities
-│   ├── read_write_tlusty.py  # TLUSTY fort.7 I/O helpers
-│   └── checkpoints/          # Pretrained weights (best_model.pt, stats.json, ...)
-├── scripts/
-│   ├── train.py              # Training entry point
-│   └── evaluate.py           # Evaluation & plotting entry point
-├── tests/
+│   └── checkpoints/          # stats.json & avg_mass_physical.npy
+│                             # (best_model.pt not included, see Important Notes)
+├── basic.py                  # Usage examples (predict / synthesize)
+├── install_tlusty.py         # TLUSTY Fortran package installer
 ├── setup.py
 ├── pyproject.toml
 ├── requirements.txt
@@ -254,7 +253,7 @@ tlusty-nn/
 
 - Python ≥ 3.9
 - PyTorch ≥ 2.0
-- NumPy, Pandas, scikit-learn, Matplotlib, tqdm
+- NumPy, Pandas, scikit-learn, Matplotlib, tqdm, astropy
 
 All dependencies are listed in `requirements.txt` and will be installed automatically with `pip install`.
 ---
@@ -272,7 +271,7 @@ The neural network model is trained and validated within the following stellar p
 ## Notes
 
 - **Extrapolation warning**: Predictions made outside the above ranges may be physically inaccurate or unreliable. The network has not been trained on data beyond these bounds.
-- **Helium abundance**: Currently, the model assumes solar Helium abundance (`logg(n_He/n_H) = 0.1` in the API). 
+- **Helium abundance**: The helium abundance is specified as `log_he_h = log(n_He/n_H)` in dex (0.0 corresponds to the solar value).
 - **Intended use**: This model is designed for rapid prototyping, parameter space exploration, and applications where TLUSTY runtime is prohibitive. For final scientific results requiring high precision, please validate against full TLUSTY calculations.
 
 

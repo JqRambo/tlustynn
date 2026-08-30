@@ -8,7 +8,7 @@ setup(
     description="Physics-Informed Neural Network (PINN) for TLUSTY stellar atmosphere prediction",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/YOUR_USERNAME/tlusty-nn",
+    url="https://github.com/JqRambo/tlustynn",
     packages=find_packages(),
     package_data={
         "tlustynn": ["checkpoints/*"],
@@ -22,6 +22,7 @@ setup(
         "scikit-learn",
         "matplotlib",
         "tqdm",
+        "astropy",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

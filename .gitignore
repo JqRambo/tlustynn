@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# 预训练权重超过 GitHub 100MB 限制, 不入库(联系作者获取)
+tlustynn/checkpoints/*.pt
