@@ -8,6 +8,7 @@ from torch.cuda.amp import autocast, GradScaler
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 
 
 class Trainer:
@@ -36,7 +37,6 @@ class Trainer:
         self.val_loader = val_loader
         self.output_cols = output_cols or []
 
-        # 变量权重向量
         self.variable_weight_vec = None
         variable_weights = self.config.get('variable_weights', {})
         if self.output_cols and variable_weights:
@@ -47,11 +47,11 @@ class Trainer:
                 vw.append(float(w))
             self.variable_weight_vec = torch.tensor(vw, dtype=torch.float32, device=device)
 
-        # 自动混合精度
+        # Automatic mixed precision
         self.use_amp = self.config.get('use_amp', False) and torch.cuda.is_available()
         self.scaler = GradScaler() if self.use_amp else None
 
-        # 优化器
+        # Optimizer
         self.optimizer = optim.AdamW(
             model.parameters(),
             lr=self.config['learning_rate'],
@@ -60,7 +60,6 @@ class Trainer:
             eps=1e-8,
         )
 
-        # 学习率调度器
         scheduler_type = self.config.get('scheduler', 'cosine')
         if scheduler_type == 'one_cycle':
             self.scheduler = optim.lr_scheduler.OneCycleLR(
@@ -86,7 +85,6 @@ class Trainer:
                 gamma=self.config.get('gamma', 0.5)
             )
 
-        # 追踪指标
         self.train_losses = []
         self.val_losses = []
         self.data_losses = []
@@ -95,11 +93,12 @@ class Trainer:
         self.patience_counter = 0
         self.current_epoch = 0
         self.global_step = 0
+        self.best_epoch = 0
 
         os.makedirs(self.config['save_dir'], exist_ok=True)
 
     def compute_loss(self, y_pred, y_true):
-        """MSE+L1 损失，含 NaN 处理与按变量加权"""
+        """Weighted MSE + L1 loss with NaN handling and per-variable weights."""
         mask = torch.isfinite(y_true)
         diff = torch.where(mask, y_pred - y_true, torch.zeros_like(y_pred))
 
@@ -121,7 +120,6 @@ class Trainer:
         return mse + 0.1 * l1_loss
 
     def train_epoch(self):
-        """训练一个 epoch"""
         self.model.train()
         total_loss = total_data = 0.0
         n_batches = 0
@@ -133,11 +131,6 @@ class Trainer:
             x = batch['x'].to(self.device, non_blocking=True)
             y_true = batch['y'].to(self.device, non_blocking=True)
 
-            if 'M' in batch:
-                mass = batch['M'].to(self.device, non_blocking=True)
-            else:
-                mass = None
-
             if 'depth' in batch:
                 depth = batch['depth'].to(self.device, non_blocking=True)
             else:
@@ -147,7 +140,7 @@ class Trainer:
 
             if self.use_amp:
                 with autocast():
-                    y_pred = self.model(x, mass=mass, depth=depth)
+                    y_pred = self.model(x, mass=batch['M'].to(self.device, non_blocking=True), depth=depth)
                     loss = self.compute_loss(y_pred, y_true)
 
                 if not torch.isfinite(loss):
@@ -166,7 +159,7 @@ class Trainer:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
-                y_pred = self.model(x, mass=mass, depth=depth)
+                y_pred = self.model(x, mass=batch['M'].to(self.device, non_blocking=True), depth=depth)
                 loss = self.compute_loss(y_pred, y_true)
 
                 if not torch.isfinite(loss):
@@ -210,7 +203,7 @@ class Trainer:
 
     @torch.no_grad()
     def validate(self):
-        """验证"""
+        """Run validation."""
         self.model.eval()
         total_loss = total_data = 0.0
         n_batches = 0
@@ -220,11 +213,6 @@ class Trainer:
             x = batch['x'].to(self.device, non_blocking=True)
             y_true = batch['y'].to(self.device, non_blocking=True)
 
-            if 'M' in batch:
-                mass = batch['M'].to(self.device, non_blocking=True)
-            else:
-                mass = None
-
             if 'depth' in batch:
                 depth = batch['depth'].to(self.device, non_blocking=True)
             else:
@@ -232,10 +220,10 @@ class Trainer:
 
             if self.use_amp:
                 with autocast():
-                    y_pred = self.model(x, mass=mass, depth=depth)
+                    y_pred = self.model(x, mass=batch['M'].to(self.device, non_blocking=True), depth=depth)
                     loss = self.compute_loss(y_pred, y_true)
             else:
-                y_pred = self.model(x, mass=mass, depth=depth)
+                y_pred = self.model(x, mass=batch['M'].to(self.device, non_blocking=True), depth=depth)
                 loss = self.compute_loss(y_pred, y_true)
 
             if not torch.isfinite(loss):
@@ -259,7 +247,6 @@ class Trainer:
         }
 
     def train(self):
-        """主训练循环"""
         print("="*70)
         print("TLUSTY NN Training")
         print("="*70)
@@ -271,7 +258,7 @@ class Trainer:
 
         start_time = time.time()
 
-        for epoch in range(self.config['epochs']):
+        for epoch in range(self.current_epoch, self.config['epochs']):
             self.current_epoch = epoch
 
             train_metrics = self.train_epoch()
@@ -299,6 +286,7 @@ class Trainer:
             if val_metrics['data'] < self.best_val_loss:
                 self.best_val_loss = val_metrics['data']
                 self.patience_counter = 0
+                self.best_epoch = epoch
                 self.save_checkpoint('best_model.pt', epoch, val_metrics)
                 print(f"Best validation loss at epoch {epoch+1}: {val_metrics['data']:.4e}")
             else:
@@ -316,35 +304,12 @@ class Trainer:
         print(f"Time: {elapsed/3600:.1f}h (avg {elapsed/(self.current_epoch+1):.1f}s/epoch)")
         print("="*70)
 
+        self.save_history_csv()
         self.plot_history()
-        self.plot_loss_distribution()
 
         return self.best_val_loss
 
-    def plot_loss_distribution(self):
-        """绘制损失随 epoch 的散点连线图"""
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        epochs = np.arange(1, len(self.train_losses) + 1)
-
-        ax.plot(epochs, self.train_losses, 'o-', color='#2E86AB',
-                linewidth=1.5, markersize=3, alpha=0.8, label='Train Loss')
-        ax.plot(epochs, self.val_losses, 's-', color='#E94F37',
-                linewidth=1.5, markersize=3, alpha=0.8, label='Val Loss')
-
-        ax.set_xlabel('Epoch', fontweight='bold')
-        ax.set_ylabel('Loss', fontweight='bold')
-        ax.set_title('Loss vs Epoch', fontweight='bold', pad=10)
-        ax.set_yscale('log')
-        ax.legend(loc='upper right', framealpha=0.95)
-        ax.grid(True, alpha=0.3, linestyle='-', color='#E0E0E0')
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.config['save_dir'], 'loss_distribution.pdf'), dpi=300)
-        plt.close()
-
     def save_checkpoint(self, filename, epoch, metrics):
-        """保存检查点"""
         path = os.path.join(self.config['save_dir'], filename)
         torch.save({
             'epoch': epoch,
@@ -355,28 +320,42 @@ class Trainer:
             'config': self.config,
         }, path)
 
+    def save_history_csv(self):
+        history_df = pd.DataFrame({
+            'epoch': np.arange(1, len(self.train_losses) + 1),
+            'train_loss': self.train_losses,
+            'val_loss': self.val_losses,
+
+            'data_loss': self.data_losses,
+
+            'learning_rate': self.learning_rates,
+        })
+        csv_path = os.path.join(self.config['save_dir'], 'training_history.csv')
+        history_df.to_csv(csv_path, index=False)
+
     def plot_history(self):
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4),
-                                sharex=True,
-                                gridspec_kw={'wspace': 0.3})
 
-        axes[0].semilogy(self.train_losses, label='Train')
-        axes[0].semilogy(self.val_losses, label='Val')
-        axes[0].set_ylabel('Total Loss', fontsize=14)
-        axes[0].set_xlabel('Epoch', fontsize=14)
-        axes[0].legend(fontsize=12)
-        axes[0].tick_params(axis='both', labelsize=11)
+        fig, ax = plt.subplots(1, 2, figsize=(12, 6), gridspec_kw={'wspace': 0.50})
 
-        axes[1].semilogy(self.data_losses)
-        axes[1].set_ylabel('Data Loss', fontsize=14)
-        axes[1].set_xlabel('Epoch', fontsize=14)
-        axes[1].tick_params(axis='both', labelsize=11)
+        ax[0].semilogy(self.train_losses, color='mediumblue', linestyle='-', linewidth=1.5, label='Train')
+        ax[0].semilogy(self.val_losses, color='orangered', linestyle='-', linewidth=1.5, label='Val')
+        ax[0].set_ylabel('Total Loss', fontsize=22)
+        ax[0].set_xlabel('Epoch', fontsize=22)
+        ax[0].legend(fontsize=20)
+        ax[0].minorticks_on()
+        ax[0].tick_params(axis='both', which='major', direction='in', length=7, width=1.2, colors='black', labelcolor='black', labelsize=18)
+        ax[0].tick_params(axis='both', which='minor', direction='in', length=4, width=1.0, colors='black')
 
-        axes[2].plot(self.learning_rates)
-        axes[2].set_xlabel('Epoch', fontsize=14)
-        axes[2].set_ylabel('Learning Rate', fontsize=14)
-        axes[2].set_yscale('log')
-        axes[2].tick_params(axis='both', labelsize=11)
+        ax[1].plot(self.learning_rates, color='mediumblue', linestyle='-', linewidth=1.5)
+        ax[1].set_xlabel('Epoch', fontsize=22)
+        ax[1].set_ylabel('Learning Rate', fontsize=22)
+        ax[1].set_yscale('log')
+        ax[1].minorticks_on()
+        ax[1].tick_params(axis='both', which='major', direction='in', length=7, width=1.2, colors='black', labelcolor='black', labelsize=18)
+        ax[1].tick_params(axis='both', which='minor', direction='in', length=4, width=1.0, colors='black')
 
-        plt.savefig(os.path.join(self.config['save_dir'], 'training_history.pdf'), dpi=300)
+        for axis in ax:
+            axis.set_box_aspect(1)
+        fig.tight_layout()
+        plt.savefig(os.path.join(self.config['save_dir'], 'training_history.pdf'), dpi=400)
         plt.close()

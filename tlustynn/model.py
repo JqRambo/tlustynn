@@ -4,7 +4,6 @@ import numpy as np
 
 
 class SinusoidalPositionEncoding(nn.Module):
-    """正弦位置编码，用于深度维度"""
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -18,7 +17,6 @@ class SinusoidalPositionEncoding(nn.Module):
 
 
 class FourierFeatures(nn.Module):
-    """傅里叶特征映射，用于恒星参数"""
     def __init__(self, input_dim, mapping_size=256, scale=4.0):
         super().__init__()
         self.input_dim = input_dim
@@ -33,7 +31,6 @@ class FourierFeatures(nn.Module):
 
 
 class ResidualBlock(nn.Module):
-    """带门控机制的残差块"""
     def __init__(self, dim, activation='silu', dropout=0.1):
         super().__init__()
         
@@ -67,14 +64,9 @@ class ResidualBlock(nn.Module):
 
 
 class TLUSTYNN(nn.Module):
-    """TLUSTY 大气模型 NN
-
-    输入：teff, logg, log_he_h（3个恒星参数）+ mass（光深，作为逐层输入）
-    输出：T, ne, rho, level_1...level_55（每层的58个大气参数）
-    """
     def __init__(self, 
-                 input_dim=3,          # 3 个恒星参数
-                 output_dim=58,        # T + ne + rho + 55 能级（mass 作为输入）
+                 input_dim=3,          # Three stellar parameters
+                 output_dim=59,        # M + T + ne + rho + 55 level populations
                  n_depths=50,
                  hidden_layers=None,
                  activation='silu',
@@ -98,7 +90,6 @@ class TLUSTYNN(nn.Module):
         if hidden_layers is None:
             hidden_layers = [1024, 2048, 4096, 4096, 2048, 1024, 512]
         
-        # 恒星参数维度 = 输入维度（因为 mass 不再是输入）
         self.stellar_dim = input_dim
         
         if use_fourier:
@@ -144,90 +135,56 @@ class TLUSTYNN(nn.Module):
         self.output_activation = nn.Tanh()
     
     def forward(self, stellar_params, mass=None, depth=None):
-        """前向传播
-        
-        Args:
-            stellar_params: [batch, 3] 恒星参数（已归一化到 [-1, 1]）
-            mass: [batch, 50] 光深（已归一化到 [-1, 1]），优先使用
-            depth: [batch, 50] 深度编码（可选，mass 为 None 时回退使用层索引）
-        
-        Returns:
-            y: [batch, 50, output_dim] 预测的大气参数（归一化到 [-1, 1]）
-        """
         if self.use_checkpoint and self.training:
             return self._forward_impl(stellar_params, mass, depth, use_checkpoint=True)
         return self._forward_impl(stellar_params, mass, depth, use_checkpoint=False)
-    
+
     def _forward_impl(self, stellar_params, mass, depth, use_checkpoint=False):
         batch_size = stellar_params.shape[0]
-        
-        # 扩展恒星参数到每个深度层
+
         if stellar_params.dim() == 2:
             stellar_params = stellar_params.unsqueeze(1).expand(-1, self.n_depths, -1)
-        
+
         stellar_params = stellar_params.reshape(batch_size * self.n_depths, self.stellar_dim)
-        
-        # 傅里叶特征编码
+
         if self.fourier is not None:
             stellar_encoded = self.fourier(stellar_params)
         else:
             stellar_encoded = stellar_params
-        
-        # 深度编码：优先使用 mass（光深），否则回退到 depth
+
         if mass is not None:
-            # mass 已经是归一化到 [-1, 1] 的值，直接映射到 [0, 1] 后编码
-            depth_norm = (mass + 1.0) / 2.0
-            depth_norm = torch.clamp(depth_norm, 0.0, 1.0)
-            depth_norm = depth_norm.reshape(batch_size * self.n_depths, 1)
-            depth_encoded = self.depth_encoding(depth_norm)
+            depth_values = mass
         elif depth is not None:
-            depth_norm = (depth + 1.0) / 2.0
-            depth_norm = torch.clamp(depth_norm, 0.0, 1.0)
-            depth_norm = depth_norm.reshape(batch_size * self.n_depths, 1)
-            depth_encoded = self.depth_encoding(depth_norm)
+            depth_values = depth
         else:
-            depth_vals = torch.linspace(-1, 1, self.n_depths, device=stellar_params.device)
-            depth = depth_vals.unsqueeze(0).expand(batch_size, -1)
-            depth_norm = (depth + 1.0) / 2.0
-            depth_norm = torch.clamp(depth_norm, 0.0, 1.0)
-            depth_norm = depth_norm.reshape(batch_size * self.n_depths, 1)
-            depth_encoded = self.depth_encoding(depth_norm)
-        
-        # 合并恒星参数和深度编码
+            depth_values = torch.linspace(-1, 1, self.n_depths, device=stellar_params.device)
+            depth_values = depth_values.unsqueeze(0).expand(batch_size, -1)
+        depth_norm = (depth_values + 1.0) / 2.0
+        depth_norm = torch.clamp(depth_norm, 0.0, 1.0)
+        depth_norm = depth_norm.reshape(batch_size * self.n_depths, 1)
+        depth_encoded = self.depth_encoding(depth_norm)
+
         x = torch.cat([stellar_encoded, depth_encoded], dim=-1)
-        
         x = self.input_proj(self.input_norm(x))
-        
+
         for block in self.blocks:
             if use_checkpoint:
                 x = torch.utils.checkpoint.checkpoint(block, x, use_reentrant=False)
             else:
                 x = block(x)
-        
+
         x = self.output_norm(x)
         y = self.output_proj(x)
-        
         y = y * self.output_scale + self.output_bias
-        
         y = self.output_activation(y)
-        
-        y = y.view(batch_size, self.n_depths, self.output_dim)
-        
-        return y
-    
-    def predict_single(self, teff, logg, log_he_h, mass=None):
-        """预测单个恒星模型（物理单位输入）
-        
-        Args:
-            teff, logg, log_he_h: 恒星参数（物理单位）
-            mass: [50] 光深（归一化到 [-1,1]），None 时使用默认层索引
-        """
+
+        return y.view(batch_size, self.n_depths, self.output_dim)
+
+    def predict_single(self, teff, logg, log_he_h):
         device = next(self.parameters()).device
         x = torch.tensor([[teff, logg, log_he_h]], dtype=torch.float32, device=device)
-        if mass is not None:
-            mass = torch.tensor(mass, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
-            return self.forward(x, mass=mass).cpu().numpy()[0]
+            return self.forward(x).cpu().numpy()[0]
 
 
 def create_model(model_type='mlp', **kwargs):

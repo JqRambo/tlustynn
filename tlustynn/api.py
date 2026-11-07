@@ -73,13 +73,11 @@ def format_abundance(abn):
         if abn == 0:
             return "0"
         else:
-            # 使用 .6e 格式，然后手动调整指数位数
+            # Use .6e formatting and then normalize the exponent width
             formatted = f"{abn:.6e}"
-            # 检查指数部分
             if 'e-' in formatted:
                 mantissa, exponent = formatted.split('e-')
                 exponent_int = int(exponent)
-                # 确保指数有两位数字
                 return f"{mantissa}e-{exponent_int:02d}"
             elif 'e+' in formatted:
                 mantissa, exponent = formatted.split('e+')
@@ -97,7 +95,7 @@ def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode
     if nst_mode==None:
 
         with open(output_path, 'w') as f:
-            f.write(f" {teff:.0f}  {logg}      ! TEFF, GRAV\n")  # 改为保留2位小数
+            f.write(f" {teff:.0f}  {logg}      ! TEFF, GRAV\n")  # Keep two decimal places
             f.write(f" {lte_flag}  {ltgray_flag}                ! LTE,  LTGRAY\n")
             f.write(f" ''                  ! no change of general optional parameters\n")
             f.write("*\n")
@@ -138,11 +136,11 @@ def create_tlusty_input(output_path, teff, logg, lte_flag, ltgray_flag, nst_mode
                     filei_str = " " * 38 + f"'{filei}'" 
                     f.write(f"   0    0{filei_str}\n")
                 else:
-                    # 修复：根据值的类型使用不同的格式化方式
+                    # Use different formatting for each value type
                     iat_str = "  " if iat == "" else f"{int(iat):3d}"
                     iz_str = "  " if iz == "" else f"{int(iz):2d}"
                     
-                    # 处理可能为空的字段
+                    # Handle fields that may be empty
                     if nlevs == "":
                         nlevs_str = "     "
                     else:
@@ -299,15 +297,6 @@ def predict_atmosphere(teff, logg, log_he_h, output_dir=None, filename=None, out
 
     df = pd.DataFrame(y_pred, columns=output_cols)
 
-    if predictor.avg_mass_physical is not None:
-        if predictor.stats and 'M' in predictor.stats.get('log_transform_cols', []):
-            mass_vals = 10 ** predictor.avg_mass_physical
-        else:
-            mass_vals = predictor.avg_mass_physical
-    else:
-        mass_vals = np.zeros(50, dtype=np.float32)
-    df.insert(0, 'M', mass_vals)
-
     filepath = None
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
@@ -373,15 +362,6 @@ class TlustyAtmosphere:
 
         df = pd.DataFrame(y_pred, columns=output_cols)
 
-        if self.predictor.avg_mass_physical is not None:
-            if self.predictor.stats and 'M' in self.predictor.stats.get('log_transform_cols', []):
-                mass_vals = 10 ** self.predictor.avg_mass_physical
-            else:
-                mass_vals = self.predictor.avg_mass_physical
-        else:
-            mass_vals = np.zeros(50, dtype=np.float32)
-        df.insert(0, 'M', mass_vals)
-
 
         filepath = None
         if output_dir is not None:
@@ -436,25 +416,25 @@ def create_fort55_lin(output_dir, filename,
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     with open(output_path, 'w') as f:
-        # 第一行: imode idstd iprin
+        # First line: imode idstd iprin
         f.write(f"{imode:8d} {idstd:7d} {iprin:7d}                                ! tmode,idstd,tprin\n")
         
-        # 第二行: inmod intrpl ichang ichemc
+        # Second line: inmod intrpl ichang ichemc
         f.write(f"{inmod:8d} {intrpl:7d} {ichang:7d} {ichemc:7d}                        ! tnmod,intrpl,ichang,ichemc\n")
         
-        # 第三行: iophli nunalp nunbet nungam nunbal
+        # Third line: iophli nunalp nunbet nungam nunbal
         f.write(f"{iophli:8d} {nunalp:7d} {nunbet:7d} {nungam:7d} {nunbal:7d}                ! tophlt,nunalp,nunbet,nungan,nunbal\n")
         
-        # 第四行: ifreq inlte icontl inlist ifhe2
+        # Fourth line: ifreq inlte icontl inlist ifhe2
         f.write(f"{ifreq:8d} {inlte:7d} {icontl:7d} {inlist:7d} {ifhe2:7d}                ! tfreq,inite,icontl,inlist,tfhe2\n")
           
-        # 第五行: ihydpr ihe1pr ihe2pr
+        # Fifth line: ihydpr ihe1pr ihe2pr
         f.write(f"{ihydpr:8d} {ihe1pr:7d} {ihe2pr:7d}                                ! thydpr,the1pr,the2pr\n")
         
-        # 第六行: alam0 alast cutof0 cutofs relop space
+        # Sixth line: alam0 alast cutof0 cutofs relop space
         f.write(f"    {alam0:.0f}    {alast:.0f}       {cutof0:.0f}       {cutofs:.0f}  {relop}    {space}\n")    
             
-        # 第七行: nmlist
+        # Seventh line: nmlist
         f.write(f"{nmlist:8d}{iunitm:8d}                                        ! nnlist\n")
 
 
@@ -502,7 +482,7 @@ def synthesize_spectrum(teff, logg, log_he_h, spec_dir, down, up, res, format, p
         spec_file = os.path.join(spec_dir, f"{teff}_{logg}_{log_he_h}.spec")
     
     if os.path.exists(spec_file):
-        spec = pd.read_csv(spec_file, sep='\s+', header=None, names=['waveobs', 'flux'])
+        spec = pd.read_csv(spec_file, sep=r'\s+', header=None, names=['waveobs', 'flux'])
 
         if plot:
 

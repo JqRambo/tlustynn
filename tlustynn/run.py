@@ -147,7 +147,8 @@ def main():
         trainer.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         trainer.current_epoch = checkpoint['epoch'] + 1
         trainer.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
-        print(f"Resumed from epoch {checkpoint['epoch']}")
+        trainer.best_epoch = checkpoint['epoch']
+        print(f"Resumed from epoch {checkpoint['epoch'] + 1}")
 
     try:
         trainer.train()
@@ -156,6 +157,7 @@ def main():
 
     summary = {
         'best_val_loss': trainer.best_val_loss,
+        'best_epoch': trainer.best_epoch + 1,
         'final_epoch': trainer.current_epoch,
         'n_params': n_params}
     with open(os.path.join(TRAIN_CONFIG['save_dir'], 'summary.json'), 'w') as f:

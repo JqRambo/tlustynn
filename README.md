@@ -7,7 +7,7 @@ Neural Network for fast prediction of TLUSTY stellar atmosphere models.
 ![Comparison of LAMOST observed spectra (black) with TLUSTY-NN predictions (red) and full TLUSTY+SYNSPEC calculations (green) for an sdB star and an ELM white dwarf](figs/sdb_wd.png)
 
 
-Given three stellar parameters — effective temperature (Teff), surface gravity (logg), and helium abundance (log(n_He / n_H)) — the network predicts the full 50-layer atmospheric structure, including temperature, electron density, mass density, and 55 level populations, in under one second.
+Given three stellar parameters — effective temperature (Teff), surface gravity (logg), and helium abundance (log(n_He / n_H)) — the network predicts the full 50-layer atmospheric structure, including mass depth, temperature, electron density, mass density, and 55 level populations, in milliseconds after model loading. A normalized mass-depth profile is used internally as the depth encoding; the grid-averaged profile is supplied automatically during inference, while the output mass-depth values are predicted by the network.
 
 
 ## Installation
@@ -53,15 +53,13 @@ After installation, reload your shell configuration:
 source ~/.bashrc
 ```
 
-### Important Notes
+### Zenodo Archive
 
-Please note that this code has not been peer-reviewed.  
+The complete v1 project, including the pretrained model weight (`best_model.pt`), is archived on Zenodo under an open-source Creative Commons Attribution license:
 
-> If you intend to use it, please contact the author, Dr. Jiao Li (lijiao@nao.cas.cn).  
+**DOI:** [https://doi.org/10.5281/zenodo.23981856](https://doi.org/10.5281/zenodo.23981856)
 
-> The pretrained model weight (`best_model.pt`, ~1 GB) exceeds GitHub's file-size limit and is therefore **not included** in this repository.
-  Please reach out to Dr. Qi Jia (jq.physics@hotmail.com) to request access, and place the file in `tlustynn/checkpoints/`.
-  Alternatively, you can train your own model with `run.py` (see below).
+GitHub contains the source code, documentation, and small metadata files. The pretrained weight is distributed through Zenodo rather than this repository. After downloading it, place `best_model.pt` in `tlustynn/checkpoints/`. Alternatively, you can train your own model with `run.py` (see below).
 
 ## Install into your Python environment
 
@@ -95,7 +93,7 @@ df, csv_path = predict_atmosphere(
 )
 
 print(f"CSV saved to: {csv_path}")   # → .../predictions/10000_3.7_0.0.csv
-print(f"DataFrame shape: {df.shape}")  # (50, 58) → 50 depths × 58 parameters
+print(f"DataFrame shape: {df.shape}")  # (50, 59) → 50 depths × 59 parameters
 ```
 
 The default file names follow the format **`{teff}_{logg}_{log_he_h}.csv`** and **`{teff}_{logg}_{log_he_h}.7`**.
@@ -180,7 +178,7 @@ The output CSV follows exactly the same column order as the original `hhe.csv` t
 | `teff` | Effective temperature [K] (replicated for all 50 rows) |
 | `logg` | Surface gravity (replicated) |
 | `log_he_h` | Helium abundance log(n_He/n_H) [dex] (replicated) |
-| `M`    | Mass depth [g/cm²] (average profile in physical units) |
+| `M`    | Mass depth [g/cm²] (predicted separately for each atmosphere) |
 | `T`    | Temperature [K] |
 | `ne`   | Electron number density [cm⁻³] |
 | `rho`  | Mass density [g/cm³] |
@@ -199,8 +197,8 @@ The `.7` file is a plain-text model atmosphere in the standard TLUSTY `fort.7` f
    1.812165E+04   8.381594E+10   1.910841E-13   7.939990E+05 ...
 ```
 
-- **Line 1**: `n_depth` (50) and `n_params` (58)
-- **Next lines**: mass-depth `M` values, 6 per line
+- **Line 1**: `n_depth` (50) and `n_params` (58, excluding the mass-depth block)
+- **Next lines**: predicted mass-depth `M` values, 6 per line
 - **Remaining lines**: for each depth, the 58 parameters (`T`, `ne`, `rho`, `level_1` … `level_55`), 5 per line
 
 ---
@@ -224,7 +222,7 @@ teff, logg, log_he_h, M, T, ne, rho, level_1, ..., level_N
 
 i.e. the three stellar parameters, the mass depth `M` (first data block of the TLUSTY `.7` file), and the target quantities. See the header of `tlustynn/run.py` for details.
 
-Trained checkpoints (`best_model.pt`, `stats.json`, `avg_mass_physical.npy`, ...) will be saved to `./checkpoints/` by default (override with `--save_dir`).
+Trained checkpoints (`best_model.pt`, `stats.json`, `avg_mass_physical.npy`, and `grid_coverage.csv`) will be saved to `./checkpoints/` by default (override with `--save_dir`).
 
 ---
 
@@ -237,13 +235,15 @@ tlustynn/
 │   ├── api.py                # User-facing predict_atmosphere() & synthesize_spectrum() API
 │   ├── model.py              # TLUSTYNN network definition
 │   ├── predict.py            # TlustyPredictor (model loading & inference)
+│   ├── grid_coverage.py      # Grid-boundary and gap warnings
 │   ├── data_loader.py        # Dataset & preprocessing
 │   ├── train.py              # Trainer class
 │   ├── run.py                # Training entry point for custom datasets
 │   ├── evaluate.py           # Evaluation & plotting entry point
 │   ├── utils.py              # Plotting utilities
-│   └── checkpoints/          # stats.json & avg_mass_physical.npy
-│                             # (best_model.pt not included, see Important Notes)
+│   ├── plot_param_space.py   # Parameter-space error maps
+│   └── checkpoints/          # stats.json, summary.json, avg_mass_physical.npy,
+│                             # grid_coverage.csv; best_model.pt is not included
 ├── basic.py                  # Usage examples (predict / synthesize)
 ├── install_tlusty.py         # TLUSTY Fortran package installer
 ├── setup.py
@@ -270,12 +270,12 @@ The neural network model is trained and validated within the following stellar p
 | Parameter | Symbol | Range | Units |
 |-----------|--------|-------|-------|
 | Effective temperature | `Teff` | 10,000 – 100,000 | K |
-| Surface gravity | `logg` | 1.5 – 10.0 | log10(cm/s²) |
-| Helium abundance | `log(n_He / n_H)` | -4.0 – 0.0 | dex |
+| Surface gravity | `logg` | 2.3 – 9.0 | log10(cm/s²) |
+| Helium abundance | `log(n_He / n_H)` | -5.21442 – 3.21442 | dex |
 
 ## Notes
 
-- **Extrapolation warning**: Predictions made outside the above ranges may be physically inaccurate or unreliable. The network has not been trained on data beyond these bounds.
+- **Extrapolation warning**: The API returns warnings for inputs outside the converged-grid bounds and for inputs near missing models in the local grid neighborhood.
 - **Helium abundance**: The helium abundance is specified as `log_he_h = log(n_He/n_H)` in dex (0.0 corresponds to the solar value).
 - **Intended use**: This model is designed for rapid prototyping, parameter space exploration, and applications where TLUSTY runtime is prohibitive. For final scientific results requiring high precision, please validate against full TLUSTY calculations.
 

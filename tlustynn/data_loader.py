@@ -4,19 +4,16 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 import warnings
-import os
 
 warnings.filterwarnings('ignore')
 
-from .config import AVG_MASS_SAVE_PATH
-
 
 PHYSICAL_LIMITS = {
-    'T': {'min': 100.0, 'max': 1e6},         # 大气温度 T 物理上限约 ~5e5K (99.99 percentile)；1e6 留足安全余量，排除数值异常点
-    'Teff': {'min': 9000, 'max': 100000},    # 有效温度（输入参数）范围
-    'logg': {'min': 1.5, 'max': 8.0},        # 表面重力
-    'ne': {'min': 1e-10, 'max': 1e30},       # 电子数密度 [cm^-3]
-    'rho': {'min': 1e-30, 'max': 1e3},       # 质量密度 [g/cm^3]
+    'T': {'min': 100.0, 'max': 1e6},         # T 
+    'Teff': {'min': 9000, 'max': 100000},    # Teff
+    'logg': {'min': 1.5, 'max': 9.0},        # logg
+    'ne': {'min': 1e-10, 'max': 1e30},       # ne [cm^-3]
+    'rho': {'min': 1e-30, 'max': 1e3},       # rho [g/cm^3]
 }
 
 
@@ -26,7 +23,7 @@ TEFF_LOGG_CONSTRAINTS = {
 
 
 class TlustyDataset(Dataset):
-    """TLUSTY 数据集：每个样本是一个恒星大气模型（50层）"""
+    """Fifty-layer TLUSTY models with M included in the supervised outputs."""
     def __init__(self, df, input_cols, output_cols, normalize=False,
                  input_stats=None, output_stats=None, log_transform_cols=None):
         self.input_cols = input_cols
@@ -35,60 +32,44 @@ class TlustyDataset(Dataset):
         self.input_stats = input_stats
         self.output_stats = output_stats
         self.log_transform_cols = log_transform_cols or []
-        # 恒星参数列（不含 mass，mass 作为模型输入）
-        self.stellar_input_cols = [c for c in input_cols if c != 'M']
-        
-        # 预先把 DataFrame 转成 numpy 数组，避免 __getitem__ 反复做 pandas 过滤
+        self.stellar_input_cols = input_cols
+
+        if 'M' not in self.output_cols:
+            raise ValueError("M must be included in output_cols")
+
         df = df.reset_index(drop=True)
         df['model_id'] = df[self.stellar_input_cols].astype(str).agg('_'.join, axis=1)
         self.model_ids = df['model_id'].unique()
         self._verify_structure(df, self.model_ids)
-        
-        sort_col = 'M' if 'M' in df.columns else self.stellar_input_cols[0]
-        # all_cols 必须包含 mass（用于深度排序和作为模型输入），即使 output_cols 不含 mass
-        mass_col = 'M'
-        all_cols = self.stellar_input_cols + [mass_col] + self.output_cols
-        
-        # 按 model_id 和深度排序，reshape 为 [n_models, 50, n_cols]
-        df_sorted = df.sort_values(['model_id', sort_col])
+
+        all_cols = self.stellar_input_cols + self.output_cols
+        df_sorted = df.sort_values(['model_id', 'M'])
         data = df_sorted[all_cols].values.astype(np.float32)
         n_models = len(self.model_ids)
         data = data.reshape(n_models, 50, len(all_cols))
-        
-        # x: 恒星参数（每层相同，取第 0 层）
+
         self._x = data[:, 0, :len(self.stellar_input_cols)]
-        # mass: 光深（作为模型输入）
-        self._mass = data[:, :, len(self.stellar_input_cols)]
-        # y: 输出变量（不含 mass）
-        self._y = data[:, :, len(self.stellar_input_cols)+1:]
-        # depth 编码：固定 1-50 归一化到 [-1, 1]
-        self._depths = (2.0 * (np.arange(50, dtype=np.float32) - 1) / 49.0 - 1.0)
-        
-        # 释放 pandas 内存（numpy view 已持有数据）
+        self._y = data[:, :, len(self.stellar_input_cols):]
+        self._mass = self._y[:, :, 0].copy()
+        self._depths = 2.0 * np.arange(50, dtype=np.float32) / 49.0 - 1.0
+
         del df, df_sorted, data
-    
+
     def _verify_structure(self, df, model_ids):
-        """验证每个模型是否恰好有 50 层"""
-        n_models_checked = min(100, len(model_ids))
-        for model_id in model_ids[:n_models_checked]:
-            model_data = df[df['model_id'] == model_id]
-            if len(model_data) != 50:
-                pass
-    
+        counts = df.groupby('model_id').size()
+        invalid = counts[counts != 50]
+        if not invalid.empty:
+            raise ValueError(f"Expected 50 layers per model; found {len(invalid)} invalid models")
+
     def _normalize_input(self, x):
-        """对恒星输入参数进行 Min-Max 归一化到 [-1, 1]"""
         for i, col in enumerate(self.stellar_input_cols):
             if col in self.input_stats:
                 xmin = self.input_stats[col]['min']
                 xmax = self.input_stats[col]['max']
-                if xmax > xmin:
-                    x[i] = 2.0 * (x[i] - xmin) / (xmax - xmin) - 1.0
-                else:
-                    x[i] = 0.0
+                x[i] = 2.0 * (x[i] - xmin) / (xmax - xmin) - 1.0 if xmax > xmin else 0.0
         return x
-    
+
     def _normalize_output(self, y):
-        """对输出变量进行 Min-Max 归一化到 [-1, 1]"""
         for i, col in enumerate(self.output_cols):
             if col in self.output_stats:
                 ymin = self.output_stats[col]['min']
@@ -98,55 +79,40 @@ class TlustyDataset(Dataset):
                 else:
                     y[:, i] = 0.0
         return y
-    
+
     def __len__(self):
         return len(self.model_ids)
-    
+
     def __getitem__(self, idx):
-        """获取单个模型样本（向量化版本，直接从预计算 numpy 数组索引）"""
-        x = self._x[idx]
-        mass = self._mass[idx]
-        y = self._y[idx]
+        x = self._x[idx].copy()
+        y = self._y[idx].copy()
+        mass = self._mass[idx].copy()
         depths = self._depths.copy()
-        
-        # 对数变换（在归一化之前）
+
         if self.log_transform_cols:
             for i, col in enumerate(self.output_cols):
                 if col in self.log_transform_cols:
                     mask = y[:, i] > 0
                     y[mask, i] = np.log10(y[mask, i])
-        
-        # 确保恰好 50 层
-        if y.shape[0] != 50:
-            if y.shape[0] < 50:
-                pad = np.zeros((50 - y.shape[0], y.shape[1]), dtype=np.float32)
-                y = np.vstack([y, pad])
-                mass_pad = np.zeros(50 - len(mass), dtype=np.float32)
-                mass = np.concatenate([mass, mass_pad])
-                depths = np.concatenate([depths, np.zeros(50 - len(depths), dtype=np.float32)])
-            else:
-                y = y[:50]
-                mass = mass[:50]
-                depths = depths[:50]
-        
-        # 如果需要，进行归一化（通常在 load_and_preprocess_data 中已完成）
+
         if self.normalize and self.input_stats is not None:
             x = self._normalize_input(x)
         if self.normalize and self.output_stats is not None:
             y = self._normalize_output(y)
-            # mass 若在 output_stats 中也进行归一化
+            if 'M' in self.log_transform_cols:
+                mass = np.log10(np.maximum(mass, 1e-30))
             if 'M' in self.output_stats:
-                mass = self._normalize_mass(mass)
-        
-        result = {
+                ymin = self.output_stats['M']['min']
+                ymax = self.output_stats['M']['max']
+                mass = 2.0 * (mass - ymin) / (ymax - ymin) - 1.0
+
+        return {
             'x': torch.tensor(x, dtype=torch.float32),
             'M': torch.tensor(mass, dtype=torch.float32),
             'depth': torch.tensor(depths, dtype=torch.float32),
             'y': torch.tensor(y, dtype=torch.float32),
             'model_id': self.model_ids[idx]
         }
-        
-        return result
     
 
 
@@ -161,7 +127,6 @@ def safe_log(x, eps=1e-30):
 
 
 def clip_to_physical_range(df, col, physical_type=None):
-    """将数据裁剪到物理合理范围"""
     if physical_type and physical_type in PHYSICAL_LIMITS:
         limits = PHYSICAL_LIMITS[physical_type]
         df[col] = df[col].clip(lower=limits['min'], upper=limits['max'])
@@ -169,7 +134,7 @@ def clip_to_physical_range(df, col, physical_type=None):
 
 
 def round_to_dataset_grid(teff, logg, log_he_h):
-    """将恒星参数四舍五入到数据集的网格上"""
+    """Round stellar parameters to the dataset grid."""
     teff_r = np.round(teff / 500.0) * 500.0
     logg_r = np.round(logg / 0.1) * 0.1
     log_he_h_r = np.round(log_he_h / 0.5) * 0.5
@@ -177,7 +142,7 @@ def round_to_dataset_grid(teff, logg, log_he_h):
 
 
 def normalize_input_physical(x, stats, input_cols=None):
-    """将物理单位的输入归一化到 [-1, 1]"""
+    """Normalize physical-unit inputs to [-1, 1]."""
     if input_cols is None:
         input_cols = stats.get('input_cols', ['teff', 'logg', 'log_he_h'])
     if isinstance(x, np.ndarray):
@@ -199,7 +164,7 @@ def normalize_input_physical(x, stats, input_cols=None):
 
 
 def denormalize_input_physical(x_norm, stats, input_cols=None):
-    """将 [-1, 1] 的输入反归一化到物理单位"""
+    """Restore inputs from [-1, 1] to physical units."""
     if input_cols is None:
         input_cols = stats.get('input_cols', ['teff', 'logg', 'log_he_h'])
     if isinstance(x_norm, np.ndarray):
@@ -217,25 +182,20 @@ def denormalize_input_physical(x_norm, stats, input_cols=None):
 
 
 def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=True):
-    """加载并预处理 TLUSTY 数据"""
     df = pd.read_csv(csv_path)
     
-    # 输入列：3 个恒星参数
     input_cols = ['teff', 'logg', 'log_he_h']
     
-    # 输出列：mass + T + ne + rho + 55 个能级布居数
+    # M + T + ne + rho + 55 
     depth_related_cols = ['depth_index', 'depth_index.1', 'DEPTH_INDEX', 'depth']
     exclude_cols = input_cols + depth_related_cols + ['model_id']
     output_cols = [col for col in df.columns if col not in exclude_cols]
-    # 确保 mass 在输出列中且排在前面（与原 CSV 顺序一致）
     if 'M' in output_cols:
         output_cols.remove('M')
         output_cols = ['M'] + output_cols
     
-    # 生成模型 ID
     df['model_id'] = df[['teff', 'logg', 'log_he_h']].astype(str).agg('_'.join, axis=1)
     
-    # 检查异常值
     issue_counts = {}
     for col in output_cols:
         n_nan = df[col].isna().sum()
@@ -252,7 +212,6 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
         if len(issue_counts) > 5:
             print(f"    ... and {len(issue_counts) - 5} more columns")
     
-    # 清洗数据
     for col in output_cols:
         df[col] = df[col].replace([np.inf, -np.inf], np.nan)
         
@@ -272,28 +231,23 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
             df[col] = df[col].clip(lower=1e-30)
             df[col] = df[col].replace(0, 1e-30)
     
-    # 自动决定对数变换列（针对大动态范围变量）
     if log_transform_cols is None:
         log_transform_cols = []
         for col in output_cols:
-            # 温度 T 也参与动态范围判断；若 max/min > 100 则做对数变换
-            # （原代码此处硬编码跳过 T，导致 T 的归一化动态范围被异常高温点压垮）
             if col.startswith('temp'):
                 continue
             
             col_min = df[col].min()
             col_max = df[col].max()
             
-            if col_max / col_min > 100:  # 大动态范围
+            if col_max / col_min > 100:  
                 log_transform_cols.append(col)
     
-    # 执行对数变换
     for col in log_transform_cols:
         if col in df.columns:
             df[col] = df[col].clip(lower=1e-30, upper=1e30)
             df[col] = safe_log10(df[col].values)
     
-    # 异常值裁剪（5 sigma）
     for col in output_cols:
         mean = df[col].mean()
         std = df[col].std()
@@ -303,19 +257,8 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
         if n_clipped > 0:
             df[col] = df[col].clip(lower=lower, upper=upper)
     
-    # 计算平均 mass 剖面（物理单位），在归一化之前保存
-    df_sorted_for_mass = df.sort_values(['model_id', 'M'])
-    mass_data = df_sorted_for_mass.groupby('model_id')['M'].apply(lambda x: x.values)
-    avg_mass_physical = np.mean(np.stack(mass_data.values), axis=0)
-    
-    avg_mass_dir = os.path.dirname(AVG_MASS_SAVE_PATH)
-    os.makedirs(avg_mass_dir, exist_ok=True)
-    np.save(AVG_MASS_SAVE_PATH, avg_mass_physical.astype(np.float32))
-    print(f"  Saved average physical mass profile to {AVG_MASS_SAVE_PATH}")
-    
-    # Min-Max 归一化到 [-1, 1]
     normalization = 'minmax'
-    
+
     input_stats = {}
     for col in input_cols:
         xmin = df[col].min()
@@ -325,7 +268,7 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
         input_stats[col] = {'min': float(xmin), 'max': float(xmax), 'mean': float(df[col].mean()), 'std': float(df[col].std())}
         df[col] = 2.0 * (df[col] - xmin) / (xmax - xmin) - 1.0
         df[col] = df[col].clip(-1, 1)
-    
+
     output_stats = {}
     for col in output_cols:
         ymin = df[col].min()
@@ -337,43 +280,32 @@ def load_and_preprocess_data(csv_path, log_transform_cols=None, apply_clipping=T
             output_stats[col] = {'min': float(ymin), 'max': float(ymax), 'mean': float(df[col].mean()), 'std': float(df[col].std())}
             df[col] = 2.0 * (df[col] - ymin) / (ymax - ymin) - 1.0
             df[col] = df[col].clip(-1, 1)
-    
-    # 从模型输出中移除 mass，mass 将作为输入
-    output_cols_full = output_cols.copy()
-    model_output_cols = [c for c in output_cols if c != 'M']
-    
-    # 计算平均 mass 剖面（归一化后），用于预测时默认输入
-    df_sorted_for_mass = df.sort_values(['model_id', 'M'])
-    mass_data = df_sorted_for_mass.groupby('model_id')['M'].apply(lambda x: x.values)
-    avg_mass_norm = np.mean(np.stack(mass_data.values), axis=0)
-    
+
     stats = {
         'input': input_stats,
         'output': output_stats,
         'log_transform_cols': log_transform_cols,
         'input_cols': input_cols,
-        'output_cols': model_output_cols,
-        'output_cols_full': output_cols_full,
+        'output_cols': output_cols,
         'mass_stats': output_stats.get('M', {}),
         'mass_log_transformed': 'M' in log_transform_cols,
-        'avg_mass_norm': avg_mass_norm.astype(np.float32).tolist(),
-        'depth_col': None,  # mass 作为输入，深度编码使用固定层索引或 mass
+        'depth_col': None,
         'normalization': normalization,
         'norm_range': 'minus1_to_1'
     }
-    
+
     print(f"\nPreprocessing completed:")
     print(f"  Number of models: {len(df) // 50}")
+    print(f"  Outputs per depth: {len(output_cols)} (including predicted M)")
     print(f"  Input range: [{df[input_cols].min().min():.3f}, {df[input_cols].max().max():.3f}] (should be [-1, 1])")
-    print(f"  Output range: [{df[model_output_cols].min().min():.3f}, {df[model_output_cols].max().max():.3f}] (should be [-1, 1])")
+    print(f"  Output range: [{df[output_cols].min().min():.3f}, {df[output_cols].max().max():.3f}] (should be [-1, 1])")
     print(f"  Normalization: {normalization} to [-1, 1]")
     print(f"  Log-transform columns: {len(log_transform_cols)}")
-    
-    return df, input_cols, model_output_cols, stats
+
+    return df, input_cols, output_cols, stats
 
 
 def inverse_transform_output(y_norm, stats, output_cols):
-    """将归一化输出反变换到物理单位"""
     if isinstance(y_norm, np.ndarray):
         y_norm = torch.from_numpy(y_norm).float()
     
@@ -382,7 +314,6 @@ def inverse_transform_output(y_norm, stats, output_cols):
     else:
         y = y_norm.copy()
     
-    # 反归一化
     for i, col in enumerate(output_cols):
         if col in stats.get('output', {}):
             ymin = stats['output'][col]['min']
@@ -392,7 +323,6 @@ def inverse_transform_output(y_norm, stats, output_cols):
             else:
                 y[..., i] = (y[..., i] + 1.0) / 2.0 * (ymax - ymin) + ymin
     
-    # 反对数变换
     log_transform_cols = stats.get('log_transform_cols', [])
     if log_transform_cols:
         for i, col in enumerate(output_cols):
@@ -402,7 +332,6 @@ def inverse_transform_output(y_norm, stats, output_cols):
                 else:
                     y[..., i] = 10 ** y[..., i]
     
-    # 裁剪到物理合理范围
     for i, col in enumerate(output_cols):
         if col == 'T':
             if isinstance(y, torch.Tensor):
@@ -422,14 +351,12 @@ def inverse_transform_output(y_norm, stats, output_cols):
 
 
 def inverse_transform_input(x_norm, stats, input_cols=None):
-    """将归一化输入反变换到物理单位"""
     return denormalize_input_physical(x_norm, stats, input_cols)
 
 
 def create_data_loaders(df, input_cols, output_cols, stats,
                         batch_size=256, test_ratio=0.15, val_ratio=0.15,
                         random_seed=42, num_workers=4, log_transform_cols=None):
-    """创建训练、验证、测试 DataLoader"""
     dataset = TlustyDataset(df, input_cols, output_cols,
                            normalize=False,
                            input_stats=stats['input'],

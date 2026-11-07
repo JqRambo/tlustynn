@@ -3,42 +3,35 @@ import torch
 
 PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
 CHECKPOINT_DIR = os.path.join(PACKAGE_ROOT, 'checkpoints')
-
 CSV_PATH = './hhe.csv'
-
 INPUT_COLS = ['teff', 'logg', 'log_he_h']
-
 INPUT_RANGES = {
     'teff': {'min': 10000.0, 'max': 100000.0},
-    'logg': {'min': 1.5, 'max': 8.0},
-    'log_he_h': {'min': -4.0, 'max': 0.0},
+    'logg': {'min': 1.5, 'max': 9.0},
+    'log_he_h': {'min': -6.0, 'max': 4.0},
 }
-
 INPUT_STEPS = {
     'teff': 500.0,
     'logg': 0.1,
     'log_he_h': 0.5,
 }
-
 DATA_CONFIG = {
     'csv_path': CSV_PATH,
     'batch_size': 1280,
-    'test_ratio': 0.05,
-    'val_ratio': 0.05,
+    'test_ratio': 0.04,
+    'val_ratio': 0.04,
     'random_seed': 42,
-    'num_workers': 20,
+    'num_workers': 0,
     'pin_memory': True,
-    'persistent_workers': True,
+    'persistent_workers': False,
     'prefetch_factor': 6,
     'log_transform_cols': None,
     'normalization': 'minmax',
 }
-
-
 MODEL_CONFIG = {
     'model_type': 'mlp',
     'input_dim': 3,
-    'output_dim': 58,
+    'output_dim': 59,
     'n_depths': 50,
     'hidden_layers': [1024, 2048, 2048, 2048, 1024, 512],
     'activation': 'silu',
@@ -50,10 +43,8 @@ MODEL_CONFIG = {
     'output_clamp_range': 10.0,
     'use_checkpoint': False,
 }
-
-
 TRAIN_CONFIG = {
-    'epochs': 1500,
+    'epochs': 1000,
     'learning_rate': 1e-4,
     'weight_decay': 1e-4,
     'gradient_clip': 0.5,
@@ -67,18 +58,14 @@ TRAIN_CONFIG = {
     'use_amp': True,
     'compile_model': True,
 }
-
-
 VARIABLE_WEIGHTS = {
-    'T': 8.0,
-    'ne': 2.0,
-    'rho': 3.0,
-    'default': 2.0,
+    'M': 1.0,
+    'T': 5.0,
+    'ne': 1.0,
+    'rho': 1.0,
+    'default': 1.0,
 }
-
-
 AVG_MASS_SAVE_PATH = os.path.join(CHECKPOINT_DIR, 'avg_mass_physical.npy')
-
 INFERENCE_CONFIG = {
     'checkpoint': 'best_model.pt',
     'output_dir': './predictions',

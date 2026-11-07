@@ -11,13 +11,15 @@ import torch
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
-from tlustynn.config import TRAIN_CONFIG, DATA_CONFIG, CSV_PATH
-from tlustynn.data_loader import (round_to_dataset_grid, denormalize_input_physical,
+from .config import TRAIN_CONFIG, DATA_CONFIG, CSV_PATH, CHECKPOINT_DIR
+from .data_loader import (round_to_dataset_grid, denormalize_input_physical,
                          inverse_transform_output, inverse_transform_input,
                          load_and_preprocess_data, create_data_loaders)
-from tlustynn.model import create_model
-from tlustynn.predict import TlustyPredictor
-from tlustynn.utils import (create_single_model_plot, create_multi_model_comparison, create_scatter_comparison, create_error_by_depth)
+from .model import create_model
+from .predict import TlustyPredictor
+from .utils import (create_single_model_plot, create_multi_model_comparison,
+                   create_scatter_comparison, create_diagonal_comparison,
+                   create_error_by_depth)
 
 
 def set_seed(seed):
@@ -30,7 +32,6 @@ def set_seed(seed):
 
 
 def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=None):
-    """在测试集上评估模型性能"""
     all_predictions = []
     all_targets = []
     all_inputs = []
@@ -44,18 +45,10 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
         x = batch['x'].to(predictor.device)
         y_true = batch['y'].to(predictor.device)
         
-        if 'M' in batch:
-            mass = batch['M'].to(predictor.device)
-        else:
-            mass = None
-        
-        if 'depth' in batch:
-            depth = batch['depth'].to(predictor.device)
-        else:
-            depth = None
-        
+        depth = batch['depth'].to(predictor.device)
+
         with torch.no_grad():
-            y_pred = predictor.model(x, mass=mass, depth=depth)
+            y_pred = predictor.model(x, mass=batch['M'].to(predictor.device), depth=depth)
         
         all_predictions.append(y_pred.cpu())
         all_targets.append(y_true.cpu())
@@ -73,29 +66,22 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
 
     inputs_denorm = inverse_transform_input(inputs, stats, input_cols=input_cols)
     
-    # 打印第一个样本的反归一化输入，用于调试
     sample_teff = inputs_denorm[0, 0].item()
     print(f"  Sample input after denorm: Teff={sample_teff:.0f}K")
     
     output_cols = stats.get('output_cols', [f'col_{i}' for i in range(predictions_denorm.shape[-1])])
-    try:
-        idx_T = output_cols.index('T')
-        idx_ne = output_cols.index('ne')
-        idx_rho = output_cols.index('rho')
-    except ValueError:
-        idx_T, idx_ne, idx_rho = 0, 1, 2
-    
+    physical_indices = {name: output_cols.index(name) for name in ['T', 'ne', 'rho', 'M']}
+
     metrics = {}
-    
-    pred_flat = predictions_denorm.numpy().flatten()
-    target_flat = targets_denorm.numpy().flatten()
-    
+
+    pred_flat = predictions_denorm.numpy().flatten().astype(np.float64)
+    target_flat = targets_denorm.numpy().flatten().astype(np.float64)
     valid_mask = np.isfinite(pred_flat) & np.isfinite(target_flat)
     pred_flat_valid = pred_flat[valid_mask]
     target_flat_valid = target_flat[valid_mask]
-    
+
     print(f"Valid pixels: {valid_mask.sum()}/{len(valid_mask)} ({100*valid_mask.sum()/len(valid_mask):.1f}%)")
-    
+
     if len(pred_flat_valid) > 0:
         metrics['overall'] = {
             'mse': float(mean_squared_error(target_flat_valid, pred_flat_valid)),
@@ -104,10 +90,11 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
         }
     else:
         metrics['overall'] = {'mse': float('nan'), 'mae': float('nan'), 'r2': float('nan')}
-    
+
     def compute_metrics_safe(pred, target):
         mask = np.isfinite(pred) & np.isfinite(target)
-        p, t = pred[mask], target[mask]
+        p = pred[mask].astype(np.float64)
+        t = target[mask].astype(np.float64)
         if len(p) == 0:
             return {'mse': float('nan'), 'mae': float('nan'), 'r2': float('nan'), 'mean_relative_error': float('nan')}
         return {
@@ -116,54 +103,26 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
             'r2': float(r2_score(t, p)),
             'mean_relative_error': float(np.mean(np.abs(p - t) / (t + 1e-10))),
         }
-    
+
     metrics['per_variable'] = {}
-    
-    T_pred = predictions_denorm[:, :, idx_T].numpy().flatten()
-    T_target = targets_denorm[:, :, idx_T].numpy().flatten()
-    metrics['per_variable']['T'] = compute_metrics_safe(T_pred, T_target)
-    
-    ne_pred = predictions_denorm[:, :, idx_ne].numpy().flatten()
-    ne_target = targets_denorm[:, :, idx_ne].numpy().flatten()
-    metrics['per_variable']['ne'] = compute_metrics_safe(ne_pred, ne_target)
-    
-    rho_pred = predictions_denorm[:, :, idx_rho].numpy().flatten()
-    rho_target = targets_denorm[:, :, idx_rho].numpy().flatten()
-    metrics['per_variable']['rho'] = compute_metrics_safe(rho_pred, rho_target)
-    
-    level_indices = list(range(idx_rho + 1, len(output_cols)))
-    if level_indices:
-        level_pred = predictions_denorm[:, :, level_indices].numpy().flatten()
-        level_target = targets_denorm[:, :, level_indices].numpy().flatten()
-        metrics['per_variable']['level_pops'] = compute_metrics_safe(level_pred, level_target)
-    else:
-        metrics['per_variable']['level_pops'] = {'mse': float('nan'), 'mae': float('nan'), 'r2': float('nan'), 'mean_relative_error': float('nan')}
-    
-    metrics['depth_resolved'] = {
-        'T_mse': [],
-        'ne_mse': [],
-        'rho_mse': [],
-    }
-    
+    for name, idx in physical_indices.items():
+        pred = predictions_denorm[:, :, idx].numpy().flatten()
+        target = targets_denorm[:, :, idx].numpy().flatten()
+        metrics['per_variable'][name] = compute_metrics_safe(pred, target)
+
+    level_indices = [i for i, col in enumerate(output_cols) if col.startswith('level_')]
+    level_pred = predictions_denorm[:, :, level_indices].numpy().flatten()
+    level_target = targets_denorm[:, :, level_indices].numpy().flatten()
+    metrics['per_variable']['level_pops'] = compute_metrics_safe(level_pred, level_target)
+
+    metrics['depth_resolved'] = {f'{name}_mse': [] for name in physical_indices}
     for depth in range(50):
-        T_pred_d = predictions_denorm[:, depth, idx_T].numpy()
-        T_target_d = targets_denorm[:, depth, idx_T].numpy()
-        mask = np.isfinite(T_pred_d) & np.isfinite(T_target_d)
-        T_mse = mean_squared_error(T_target_d[mask], T_pred_d[mask]) if mask.any() else float('nan')
-        
-        ne_pred_d = predictions_denorm[:, depth, idx_ne].numpy()
-        ne_target_d = targets_denorm[:, depth, idx_ne].numpy()
-        mask = np.isfinite(ne_pred_d) & np.isfinite(ne_target_d)
-        ne_mse = mean_squared_error(ne_target_d[mask], ne_pred_d[mask]) if mask.any() else float('nan')
-        
-        rho_pred_d = predictions_denorm[:, depth, idx_rho].numpy()
-        rho_target_d = targets_denorm[:, depth, idx_rho].numpy()
-        mask = np.isfinite(rho_pred_d) & np.isfinite(rho_target_d)
-        rho_mse = mean_squared_error(rho_target_d[mask], rho_pred_d[mask]) if mask.any() else float('nan')
-        
-        metrics['depth_resolved']['T_mse'].append(float(T_mse))
-        metrics['depth_resolved']['ne_mse'].append(float(ne_mse))
-        metrics['depth_resolved']['rho_mse'].append(float(rho_mse))
+        for name, idx in physical_indices.items():
+            pred = predictions_denorm[:, depth, idx].numpy().astype(np.float64)
+            target = targets_denorm[:, depth, idx].numpy().astype(np.float64)
+            mask = np.isfinite(pred) & np.isfinite(target)
+            mse = mean_squared_error(target[mask], pred[mask]) if mask.any() else float('nan')
+            metrics['depth_resolved'][f'{name}_mse'].append(float(mse))
 
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -178,7 +137,7 @@ def evaluate_model(predictor, test_loader, stats, output_dir=None, max_samples=N
 
 
 def _round_to_dataset_grid(inputs):
-    """将输入参数四舍五入到数据集网格"""
+    """Round input parameters to the dataset grid."""
     if isinstance(inputs, torch.Tensor):
         inputs = inputs.clone()
         arr = inputs
@@ -199,7 +158,6 @@ def _round_to_dataset_grid(inputs):
 
 
 def plot_results(predictions, targets, inputs, stats, output_dir, n_samples=5):
-    """绘制评估结果图"""
     os.makedirs(output_dir, exist_ok=True)
     
     output_cols = stats.get('output_cols', [f'col_{i}' for i in range(predictions.shape[-1])])
@@ -211,9 +169,15 @@ def plot_results(predictions, targets, inputs, stats, output_dir, n_samples=5):
         idx_T, idx_ne, idx_rho = 0, 1, 2
     
     n_models = predictions.shape[0]
+    print(n_models)
     
-    np.random.seed(42)
-    sample_indices = np.random.choice(n_models, min(n_samples, n_models), replace=False)
+    n_examples = min(n_samples, n_models)
+    preferred_indices = [7500, 5333, 4500, 6000, 1500]
+    sample_indices = [index for index in preferred_indices if index < n_models][:n_examples]
+    if len(sample_indices) < n_examples:
+        fallback = np.linspace(0, n_models - 1, n_examples, dtype=int).tolist()
+        sample_indices.extend(index for index in fallback if index not in sample_indices)
+        sample_indices = sample_indices[:n_examples]
 
     if isinstance(inputs, torch.Tensor):
         inputs_np = inputs.numpy()
@@ -229,18 +193,19 @@ def plot_results(predictions, targets, inputs, stats, output_dir, n_samples=5):
         teff_val = float(inputs_display[i, 0])
         logg_val = float(inputs_display[i, 1])
         log_he_h_val = float(inputs_display[i, 2])
-        print(f"  Plot model {i+1}: Teff={teff_val:.0f}K, logg={logg_val:.2f}, log_he_h={log_he_h_val:+.2f}")
+        print(f"  Plot model {i+1}: Teff={teff_val:.0f}K, logg={logg_val:.2f}, log(n_He/n_H)={log_he_h_val:+.2f}")
     
     for i, idx in enumerate(sample_indices):
         create_single_model_plot(predictions, targets, inputs_display, idx, output_dir, stats=stats)
     
-    # 绘制多模型对比图（最多 3 个模型）
-    multi_indices = sample_indices[:3].tolist()
+    # multi_indices = sample_indices[:3].tolist()
+    multi_indices = sample_indices[:3]
+
     if len(multi_indices) >= 2:
         create_multi_model_comparison(predictions, targets, inputs_display, multi_indices, output_dir, stats=stats)
     
-    # 额外绘制汇总图
     create_scatter_comparison(predictions, targets, output_dir, max_points=5000, stats=stats)
+    create_diagonal_comparison(predictions, targets, output_dir, max_points=5000, stats=stats)
     create_error_by_depth(predictions, targets, output_dir, stats=stats)
 
 
@@ -248,7 +213,7 @@ EVAL_CONFIG = {
     'checkpoint': None,
     'output_dir': './results',
     'n_samples': 5,
-    'random_seed': 42,
+    'random_seed': DATA_CONFIG['random_seed'],
 }
 
 
@@ -277,7 +242,7 @@ def main():
     
     log_transform_cols = DATA_CONFIG.get('log_transform_cols')
     
-    stats_path = os.path.join(TRAIN_CONFIG['save_dir'], 'stats.json')
+    stats_path = os.path.join(CHECKPOINT_DIR, 'stats.json')
     with open(stats_path, 'r') as f:
         training_stats = json.load(f)
 
@@ -303,7 +268,6 @@ def main():
     max_eval_samples = None
     metrics, predictions, targets, inputs = evaluate_model(predictor, test_loader, stats, output_dir, max_samples=max_eval_samples)
     
-    # 打印关键指标
     print("\nEvaluation Metrics:")
     print(f"  Overall MSE: {metrics['overall']['mse']:.6e}")
     print(f"  Overall MAE: {metrics['overall']['mae']:.6e}")
@@ -311,6 +275,7 @@ def main():
     print(f"  T   -> MSE: {metrics['per_variable']['T']['mse']:.6e}, MAE: {metrics['per_variable']['T']['mae']:.6e}")
     print(f"  ne  -> MSE: {metrics['per_variable']['ne']['mse']:.6e}, MAE: {metrics['per_variable']['ne']['mae']:.6e}")
     print(f"  rho -> MSE: {metrics['per_variable']['rho']['mse']:.6e}, MAE: {metrics['per_variable']['rho']['mae']:.6e}")
+    print(f"  M   -> MSE: {metrics['per_variable']['M']['mse']:.6e}, MAE: {metrics['per_variable']['M']['mae']:.6e}")
     
     plot_results(predictions, targets, inputs, stats, output_dir, n_samples=n_samples)
     

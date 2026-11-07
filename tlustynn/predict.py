@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 from .model import create_model
 from .data_loader import (normalize_input_physical, denormalize_input_physical,
                          round_to_dataset_grid, inverse_transform_output, inverse_transform_input)
-from .config import MODEL_CONFIG, TRAIN_CONFIG, INFERENCE_CONFIG, INPUT_COLS, AVG_MASS_SAVE_PATH, CHECKPOINT_DIR
+from .config import (MODEL_CONFIG, TRAIN_CONFIG, INFERENCE_CONFIG, INPUT_COLS,
+                     AVG_MASS_SAVE_PATH, CHECKPOINT_DIR)
+from .grid_coverage import GridCoverage
 
 
 class TlustyPredictor:
@@ -50,7 +52,6 @@ class TlustyPredictor:
         self.model.to(device)
         self.model.eval()
 
-        # 加载物理单位的平均 mass 剖面
         self.avg_mass_physical = None
         mass_path = AVG_MASS_SAVE_PATH
         if os.path.exists(mass_path):
@@ -58,6 +59,7 @@ class TlustyPredictor:
         elif self.stats and 'avg_mass_physical_path' in self.stats:
             if os.path.exists(self.stats['avg_mass_physical_path']):
                 self.avg_mass_physical = np.load(self.stats['avg_mass_physical_path'])
+        self.coverage = GridCoverage()
 
     def _create_model(self):
         model_type = self.config.get('model_type', 'mlp')
@@ -98,7 +100,7 @@ class TlustyPredictor:
         return create_model(model_type, **kwargs)
 
     def _normalize_input(self, x):
-        """将物理单位的输入归一化到 [-1, 1]"""
+        """Normalize physical-unit inputs to [-1, 1]."""
         if isinstance(x, (list, tuple)):
             x = np.array(x, dtype=np.float32)
 
@@ -140,12 +142,6 @@ class TlustyPredictor:
         return x_norm
 
     def predict(self, teff, logg, log_he_h, mass=None):
-        """预测单个或多个恒星大气模型
-
-        输入物理单位的 teff, logg, log_he_h
-        可选传入 mass [n_models, 50] 或 [50]（归一化到 [-1,1]），否则自动使用训练集平均物理 mass 剖面
-        返回包含 50 层大气参数的预测结果（T, ne, rho, 55 能级布居数）
-        """
         single_input = np.isscalar(teff)
 
         if single_input:
@@ -158,13 +154,11 @@ class TlustyPredictor:
         log_he_h_arr = np.atleast_1d(log_he_h)
         n_models = len(teff_arr)
 
-        warnings_list = []
-
         x_physical = np.column_stack([teff_arr, logg_arr, log_he_h_arr]).astype(np.float32)
+        warnings_list = self.coverage.warnings(x_physical)
         x_norm = self._normalize_input(x_physical)
         x_tensor = torch.tensor(x_norm, dtype=torch.float32).to(self.device)
 
-        # 准备 mass 输入
         if mass is not None:
             mass_arr = np.atleast_2d(mass).astype(np.float32)
             if mass_arr.shape[0] == 1 and n_models > 1:
@@ -205,7 +199,6 @@ class TlustyPredictor:
         return result
 
     def predict_to_fort7(self, teff, logg, log_he_h, output_path=None):
-        """预测并保存为类似 fort.7 格式的 CSV"""
         result = self.predict(teff, logg, log_he_h)
         y_pred = result['prediction'][0]
 
@@ -230,7 +223,6 @@ class TlustyPredictor:
 
     def generate_grid_predictions(self, teff_range, logg_range, log_he_h_values,
                                    output_dir=None, plot=True):
-        """对恒星参数网格进行预测"""
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
@@ -289,7 +281,6 @@ class TlustyPredictor:
         return results
 
     def _plot_grid_results(self, result, output_dir):
-        """绘制网格预测结果"""
         log_he_h = result['log_he_h']
         predictions = result['predictions']
         teff_grid = result['teff_grid']
@@ -314,18 +305,18 @@ class TlustyPredictor:
             im = ax.contourf(teff_grid, logg_grid, T_depth, levels=20, cmap='hot')
             ax.set_xlabel('Teff [K]')
             ax.set_ylabel('logg')
-            ax.set_title(f'Temperature ({depth_name}, depth={depth_idx+1})')
+            ax.text(0.04, 0.95, f'{depth_name}, layer {depth_idx + 1}',
+                    transform=ax.transAxes, ha='left', va='top')
             plt.colorbar(im, ax=ax, label='T [K]')
 
         plt.tight_layout()
         plt.savefig(
-            os.path.join(output_dir, f'Temperature_grid_log_he_h{log_he_h:.1f}.png'),
-            dpi=150
+            os.path.join(output_dir, f'Temperature_grid_log_he_h{log_he_h:.1f}.pdf'),
+            dpi=400
         )
         plt.close()
 
     def compare_with_data(self, df_test, n_samples=5, output_dir=None):
-        """将预测结果与测试数据进行对比"""
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
@@ -350,7 +341,6 @@ class TlustyPredictor:
                 output_cols.remove('M')
             y_true = model_data[output_cols].values
 
-            # 使用真实 mass 进行更准确的对比
             mass_true_norm = None
             if self.stats and 'avg_mass_norm' in self.stats:
                 mass_stats = self.stats.get('mass_stats', {})
@@ -393,7 +383,6 @@ class TlustyPredictor:
         }
 
     def _plot_comparison(self, result, idx, output_dir):
-        """绘制预测与真实数据的对比图"""
         depth = np.arange(1, 51)
 
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
@@ -418,7 +407,6 @@ class TlustyPredictor:
             ax.set_ylabel(title)
             ax.set_yscale(scale)
             ax.legend()
-            ax.grid(True, alpha=0.3)
 
         axes[3].text(0.5, 0.5,
                     f"Teff={result['teff']:.0f}\n"
@@ -434,11 +422,10 @@ class TlustyPredictor:
         axes[4].axis('off')
         axes[5].axis('off')
 
-        plt.suptitle(f'Model {idx+1} Comparison')
         plt.tight_layout()
         plt.savefig(
-            os.path.join(output_dir, f'comparison_{idx+1}.png'),
-            dpi=150
+            os.path.join(output_dir, f'comparison_{idx+1}.pdf'),
+            dpi=400
         )
         plt.close()
 
@@ -486,7 +473,7 @@ def main():
     print(f"Checkpoint: {checkpoint or 'default'}")
     print(f"  Teff: {teff} K")
     print(f"  logg: {logg}")
-    print(f"  [M/H]: {log_he_h}")
+    print(f"  log(n_He/n_H): {log_he_h}")
     print("="*70)
 
     predictor = TlustyPredictor(checkpoint_path=checkpoint)
@@ -494,6 +481,8 @@ def main():
     result = predictor.predict(teff, logg, log_he_h)
 
     print(f"\nTeff={teff}, logg={logg}, log(n_He/n_H)={log_he_h}")
+    for message in result['warnings']:
+        print(f'WARNING: {message}')
     print("Prediction completed.")
 
     predictor.predict_to_fort7(teff, logg, log_he_h, output)
@@ -520,14 +509,12 @@ def main():
             ax.set_xlabel('Depth Index')
             ax.set_ylabel(title)
             ax.set_yscale(scale)
-            ax.grid(True, alpha=0.3)
 
-        plt.suptitle(f'Teff={teff}, logg={logg}, log(n_He/n_H)={log_he_h}')
         plt.tight_layout()
-        save_path = os.path.join(output_dir, f'prediction_T{teff}_g{logg}_m{log_he_h}.png')
-        plt.savefig(save_path, dpi=150)
+        save_path = os.path.join(output_dir, f'prediction_T{teff}_g{logg}_m{log_he_h}.pdf')
+        plt.savefig(save_path, dpi=400)
         print(f"Saved plot to {save_path}")
-        plt.show()
+        plt.close(fig)
 
 
 if __name__ == '__main__':

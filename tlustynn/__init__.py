@@ -1,5 +1,5 @@
 """
-TLUSTY NN – Physics-Informed Neural Network for stellar atmosphere modelling.
+TLUSTY NN – Neural-network emulator for stellar atmosphere modelling.
 
 Quick start
 -----------

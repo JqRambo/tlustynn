@@ -32,16 +32,16 @@ work_dir = '/home/ubuntu/phd/test/wd'
 
 
 
-# synthesize_spectrum 无返回值, 光谱写入工作目录:
-#   <teff>_<logg>_<log_he_h>.spec(原始输出)、.csv 或 .fits(format 控制)、spec.pdf(plot=True 时)
+# synthesize_spectrum returns no value; spectra are written to the working directory:
+#   <teff>_<logg>_<log_he_h>.spec (raw output), .csv or .fits (controlled by format), spec.pdf (when plot=True)
 # synthesize_spectrum(
 #     teff=35000,
 #     logg=4.5,
 #     log_he_h=0.0,
-#     spec_dir='/home/ubuntu/phd/test/wd',          # 工作目录，所有中间文件和结果都会放在这里
-#     down=3000, up=9000,  # 波长范围 (Å)
-#     res=0.1,             # 波长步长 (Å)
-#     format='csv',        # 'csv' 或 'fits'
+#     spec_dir='/home/ubuntu/phd/test/wd',          # Working directory for intermediate files and results
+#     down=3000, up=9000,  # Wavelength range (Å)
+#     res=0.1,             # Wavelength step (Å)
+#     format='csv',        # 'csv' or 'fits'
 #     plot=True
 # )
 
