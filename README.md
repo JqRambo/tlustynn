@@ -283,4 +283,4 @@ The neural network model is trained and validated within the following stellar p
 
 ## Acknowledgements
 
-Thanks to Dr. Jiao Li, Dr. Jiadong Li, Dr. Mingjie Jian, Dr. Yangping Luo, Dr. Xiao Han, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
+Thanks to Dr. Chengyuan Li, Dr. Chenyu He, Dr. Xiaodian Chen, Dr. Zhihong He and Dr. Qian Cui for their assistance with this project.
